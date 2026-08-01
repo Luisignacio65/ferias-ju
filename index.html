@@ -1874,11 +1874,14 @@ function wireEncuentro(){
       var existe = PROVEEDORES_CATALOGO.some(function(p){return p.n.toLowerCase()===val.toLowerCase();});
       var box = document.getElementById('nuevoProvBox');
       if(val && !existe){
+        var lineaGuardada = e.proveedor_linea || '';
+        var qrGuardado = !!(e.onboarding && e.onboarding.qr_mostrado);
+        var courierGuardado = !!(e.onboarding && e.onboarding.courier_entregado);
         box.innerHTML = '<div class="card" style="background:var(--bg)">'+
           '<p><strong>Proveedor nuevo:</strong> '+escapeHtml(val)+'</p>'+
-          '<label class="small">Línea</label><select id="fLineaNueva">'+['Moda','Denim','Institucional','Moda Pesada','Punto'].map(function(l){return '<option>'+l+'</option>';}).join('')+'</select>'+
-          '<div class="checkbox-row"><input type="checkbox" id="fQr"> Mostrar QR de alta (OEA)</div>'+
-          '<div class="checkbox-row"><input type="checkbox" id="fCourier"> Entregar N° de courier</div>'+
+          '<label class="small">Línea</label><select id="fLineaNueva">'+['Moda','Denim','Institucional','Moda Pesada','Punto'].map(function(l){return '<option'+(l===lineaGuardada?' selected':'')+'>'+l+'</option>';}).join('')+'</select>'+
+          '<div class="checkbox-row"><input type="checkbox" id="fQr"'+(qrGuardado?' checked':'')+'> Mostrar QR de alta (OEA)</div>'+
+          '<div class="checkbox-row"><input type="checkbox" id="fCourier"'+(courierGuardado?' checked':'')+'> Entregar N° de courier</div>'+
         '</div>';
       } else box.innerHTML='';
     }
