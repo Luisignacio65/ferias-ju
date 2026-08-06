@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Ferias">
+<link rel="manifest" href="./manifest.json">
 <title>Ferias — Captura de Campo</title>
 <style>
 :root{
@@ -1091,8 +1092,8 @@ function exportarGastosPDF(){
   toast("Generando PDF…", 4000);
   function withLibs(cb){
     if(window.jspdf && window.html2canvas) return cb();
-    var s1=document.createElement('script'); s1.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-    var s2=document.createElement('script'); s2.src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+    var s1=document.createElement('script'); s1.src="./jspdf.umd.min.js";
+    var s2=document.createElement('script'); s2.src="./html2canvas.min.js";
     var loaded=0; function done(){ loaded++; if(loaded===2) cb(); }
     s1.onload=done; s2.onload=done;
     s1.onerror=s2.onerror=function(){ toast("Sin señal para generar el PDF — intenta con wifi."); };
@@ -2153,8 +2154,8 @@ function exportarPDF(){
   toast("Generando PDF…", 4000);
   function withLibs(cb){
     if(window.jspdf && window.html2canvas) return cb();
-    var s1=document.createElement('script'); s1.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
-    var s2=document.createElement('script'); s2.src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+    var s1=document.createElement('script'); s1.src="./jspdf.umd.min.js";
+    var s2=document.createElement('script'); s2.src="./html2canvas.min.js";
     var loaded=0; function done(){ loaded++; if(loaded===2) cb(); }
     s1.onload=done; s2.onload=done;
     s1.onerror=s2.onerror=function(){ toast("Sin señal para generar el PDF — intenta con wifi."); };
@@ -2470,6 +2471,17 @@ if(window.visualViewport){
   ajustarEspacioNavbar();
   openDB(function(){ recuperarBorradores(function(){ render(); ajustarEspacioNavbar(); }); });
 })();
+
+/* ---------- Modo sin internet (service worker) ----------
+   Guarda una copia de la app en el celular la primera vez que se abre con
+   wifi/datos, para que funcione sin internet después (feria, avión, país
+   con restricciones de red como China). Los datos capturados no dependen
+   de esto — viven aparte, en IndexedDB. */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('./sw.js').catch(function(){});
+  });
+}
 </script>
 </body>
 </html>

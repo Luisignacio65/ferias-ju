@@ -1,0 +1,10 @@
+{
+  "name": "Ferias — Captura de Campo",
+  "short_name": "Ferias",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14304f",
+  "theme_color": "#14304f",
+  "orientation": "portrait"
+}
