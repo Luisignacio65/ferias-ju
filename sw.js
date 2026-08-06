@@ -5,26 +5,47 @@
 
    Los datos que capturas (fotos, notas, gastos) NO pasan por aquí — viven en
    IndexedDB del navegador, totalmente aparte de este archivo. Este service
-   worker solo cachea el "cascarón" de la app: el HTML y las dos librerías
-   de generación de PDF.
+   worker cachea el "cascarón" de la app (HTML + librerías de PDF) y, además,
+   el motor de lectura automática de comprobantes (OCR: español/inglés/
+   francés/chino) con sus datos de idioma — en total ~14 MB, una sola vez.
 
    Cómo actualizar la app más adelante: si cambias index.html, sube también
    este archivo con CACHE_NAME incrementado (v1 -> v2, etc.) para forzar a
    que el celular descargue la versión nueva la próxima vez que haya wifi. */
 
-var CACHE_NAME = 'ferias-shell-v1';
-var ARCHIVOS_CASCARON = [
+var CACHE_NAME = 'ferias-shell-v3';
+var ARCHIVOS_ESENCIALES = [
   './',
   './index.html',
   './jspdf.umd.min.js',
   './html2canvas.min.js'
+];
+var ARCHIVOS_OCR = [
+  './tesseract.min.js',
+  './worker.min.js',
+  './tesseract-core.js',
+  './tesseract-core.wasm',
+  './eng.traineddata',
+  './spa.traineddata',
+  './fra.traineddata',
+  './chi_sim.traineddata'
 ];
 
 self.addEventListener('install', function (e) {
   self.skipWaiting();
   e.waitUntil(
     caches.open(CACHE_NAME).then(function (cache) {
-      return cache.addAll(ARCHIVOS_CASCARON);
+      // El cascarón esencial (chico) debe quedar cacheado sí o sí para que
+      // la app abra offline. Los archivos de OCR pesan más (~14 MB): se
+      // cachean aparte, uno por uno, para que un fallo puntual en uno de
+      // ellos (ej. wifi débil) no tumbe el cascarón esencial ya logrado.
+      return cache.addAll(ARCHIVOS_ESENCIALES).then(function () {
+        return Promise.all(ARCHIVOS_OCR.map(function (url) {
+          return fetch(url).then(function (resp) {
+            if (resp && resp.ok) return cache.put(url, resp);
+          }).catch(function () { /* se reintenta solo en la próxima visita con red */ });
+        }));
+      });
     })
   );
 });
