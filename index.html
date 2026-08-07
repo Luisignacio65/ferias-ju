@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -6,7 +7,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Ferias">
-<link rel="manifest" href="./manifest.json">
 <title>Ferias — Captura de Campo</title>
 <style>
 :root{
@@ -179,7 +179,7 @@ body.unlocked #lockScreen{ display:none !important; }
 </div>
 
 <header class="top">
-  <div class="brand">📋 Ferias — Captura<small id="feriaActiva">Intertextile SH + Texworld/PV Paris · 25 ago-4 sept 2026</small></div>
+  <div class="brand">📋 Ferias — Captura<small id="feriaActiva">ColombiaModa · 28-30 jul 2026</small></div>
   <div class="tools">
     <span class="badge-net off" id="netBadge">Sin señal</span>
     <button class="icon" id="btnNoche" title="Día/Noche">🌙</button>
@@ -400,177 +400,6 @@ function intentarOCR(dataUrl, onDone){
   document.head.appendChild(s);
 }
 
-/* ---------- Lectura automática de comprobantes de gastos (OCR 100% local) ----------
-   A diferencia del OCR de cabezotes de arriba (que se salta si no hay señal),
-   este lee español + inglés + francés + chino simplificado, y el motor completo
-   (librería + núcleo + datos de idioma) vive empacado en el sitio — funciona
-   igual con o sin internet, una vez que el celular lo descargó la primera vez
-   con wifi. Nunca bloquea el guardado manual: si algo falla, el formulario
-   simplemente queda en blanco para completar a mano, como siempre. */
-var TESS_GASTOS_LANGS = 'eng+spa+fra+chi_sim';
-var TESS_GASTOS_WORKER = null;
-var TESS_GASTOS_CARGANDO = null;
-
-function obtenerWorkerGastos(cb){
-  if(TESS_GASTOS_WORKER){ cb(TESS_GASTOS_WORKER); return; }
-  if(TESS_GASTOS_CARGANDO){ TESS_GASTOS_CARGANDO.push(cb); return; }
-  TESS_GASTOS_CARGANDO = [cb];
-  function avisarTodos(w){
-    var lista = TESS_GASTOS_CARGANDO; TESS_GASTOS_CARGANDO = null;
-    lista.forEach(function(f){ f(w); });
-  }
-  function crear(){
-    Tesseract.createWorker({
-      workerPath: './worker.min.js',
-      corePath: './tesseract-core.js',
-      langPath: './',
-      gzip: false,
-      workerBlobURL: false,
-      logger: function(){}
-    }).then(function(w){
-      return w.loadLanguage(TESS_GASTOS_LANGS).then(function(){ return w.initialize(TESS_GASTOS_LANGS); }).then(function(){ return w; });
-    }).then(function(w){ TESS_GASTOS_WORKER = w; avisarTodos(w); })
-      .catch(function(){ avisarTodos(null); });
-  }
-  if(window.Tesseract){ crear(); return; }
-  var s = document.createElement('script');
-  s.src = './tesseract.min.js';
-  s.onload = crear;
-  s.onerror = function(){ avisarTodos(null); };
-  document.head.appendChild(s);
-}
-
-function leerComprobanteGasto(dataUrl, onDone){
-  obtenerWorkerGastos(function(worker){
-    if(!worker){ onDone(null); return; }
-    worker.recognize(dataUrl).then(function(r){
-      var texto = (r && r.data && r.data.text) || '';
-      onDone(extraerCamposComprobante(texto));
-    }).catch(function(){ onDone(null); });
-  });
-}
-
-var CIUDADES_CONOCIDAS_GASTO = [
-  {nombre:'Medellín', re:/medell[íi]n/i},
-  {nombre:'Bogotá', re:/bogot[áa]/i},
-  {nombre:'Cali', re:/\bcali\b/i},
-  {nombre:'Shanghái', re:/shanghai|shangh[áa]i|上\s*海/i},
-  {nombre:'París', re:/\bparis\b|par[íi]s/i}
-];
-var CONCEPTO_PATRONES_GASTO = [
-  {concepto:'Transporte', re:/taxi|uber|didi|grab|metro\b|地铁|出租车|\btrain\b|gare|aeropuerto|airport|airlines|aerol[íi]nea/i},
-  {concepto:'Alojamiento', re:/hotel|hostal|hostel|booking|agoda|酒店|auberge/i},
-  {concepto:'Restaurantes', re:/restaurant|resto\b|bistro|饭店|餐厅|almuerzo|\bcena\b|dinner|lunch/i},
-  {concepto:'Refrigerios', re:/caf[ée]|coffee|snack|bakery|panader[íi]a|咖啡/i},
-  {concepto:'Muestras', re:/\btela\b|fabric|textile|sample|muestra/i}
-];
-var LINEAS_IGNORAR_BENEFICIARIO = /^(recibo|receipt|factura|invoice|ticket|gracias|thank you|merci|谢谢|发票|收据|nit\b|ruc\b|tel[:.]?|www\.|http)/i;
-
-function pad2(v){ v=String(v); return v.length<2? '0'+v : v; }
-
-function detectarFechaComprobante(texto){
-  var m = texto.match(/(20\d{2})[-\/.](0?[1-9]|1[0-2])[-\/.](0?[1-9]|[12]\d|3[01])/);
-  if(m) return m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]);
-  m = texto.match(/(20\d{2})\s*年\s*(0?[1-9]|1[0-2])\s*月\s*(0?[1-9]|[12]\d|3[01])\s*日/);
-  if(m) return m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]);
-  m = texto.match(/(0?[1-9]|[12]\d|3[01])[-\/.](0?[1-9]|1[0-2])[-\/.](20\d{2})/);
-  if(m) return m[3]+'-'+pad2(m[2])+'-'+pad2(m[1]);
-  m = texto.match(/(0?[1-9]|[12]\d|3[01])[-\/.](0?[1-9]|1[0-2])[-\/.](\d{2})\b/);
-  if(m){ var yy=parseInt(m[3],10); var yyyy=(yy<50? 2000+yy : 1900+yy); return yyyy+'-'+pad2(m[2])+'-'+pad2(m[1]); }
-  return '';
-}
-function normalizarNumeroComprobante(s){
-  s = s.replace(/[^\d.,]/g,'');
-  if(!s) return null;
-  var lastComma = s.lastIndexOf(','), lastDot = s.lastIndexOf('.');
-  if(lastComma>-1 && lastDot>-1){
-    if(lastComma>lastDot) s = s.replace(/\./g,'').replace(',','.');
-    else s = s.replace(/,/g,'');
-  } else if(lastComma>-1){
-    var trasC = s.length-lastComma-1;
-    if(trasC===2) s = s.replace(',','.'); else s = s.replace(/,/g,'');
-  } else if(lastDot>-1){
-    var partes = s.split('.');
-    var trasP = partes[partes.length-1].length;
-    if(partes.length>2 || trasP===3) s = s.replace(/\./g,'');
-  }
-  var val = parseFloat(s);
-  return isNaN(val)? null : val;
-}
-function extraerNumeroDeLineaComprobante(linea){
-  var re = /\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?/g;
-  var m, mejor=null;
-  while((m=re.exec(linea))){
-    var n = normalizarNumeroComprobante(m[0]);
-    if(n!=null && (mejor==null || n>mejor)) mejor=n;
-  }
-  return mejor;
-}
-var PALABRAS_TOTAL_GASTO = ['total a pagar','total general','grand total','montant total','montant ttc','total ttc','总计','合计','amount due','import total','valor total','total'];
-function detectarMontoComprobante(texto){
-  var lineas = texto.split('\n');
-  for(var i=0;i<lineas.length;i++){
-    var linea = lineas[i].toLowerCase();
-    for(var j=0;j<PALABRAS_TOTAL_GASTO.length;j++){
-      if(linea.indexOf(PALABRAS_TOTAL_GASTO[j])>=0){
-        var num = extraerNumeroDeLineaComprobante(lineas[i]);
-        if(num!=null) return num;
-      }
-    }
-  }
-  var candidatos = [];
-  var re = /\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?/g, m;
-  while((m=re.exec(texto))){
-    var n = normalizarNumeroComprobante(m[0]);
-    if(n!=null && n>0 && n<10000000) candidatos.push(n);
-  }
-  if(!candidatos.length) return null;
-  candidatos.sort(function(a,b){return b-a;});
-  return candidatos[0];
-}
-function detectarBeneficiarioComprobante(texto){
-  var lineas = texto.split('\n').map(function(l){return l.trim();}).filter(Boolean);
-  for(var i=0;i<Math.min(lineas.length,6);i++){
-    var l = lineas[i];
-    if(l.length<2) continue;
-    if(LINEAS_IGNORAR_BENEFICIARIO.test(l)) continue;
-    if(/^[\d\s\-\/.:]+$/.test(l)) continue;
-    return l;
-  }
-  return '';
-}
-function detectarCiudadComprobante(texto){
-  for(var i=0;i<CIUDADES_CONOCIDAS_GASTO.length;i++){
-    if(CIUDADES_CONOCIDAS_GASTO[i].re.test(texto)) return CIUDADES_CONOCIDAS_GASTO[i].nombre;
-  }
-  return '';
-}
-function detectarConceptoComprobante(texto){
-  for(var i=0;i<CONCEPTO_PATRONES_GASTO.length;i++){
-    if(CONCEPTO_PATRONES_GASTO[i].re.test(texto)) return CONCEPTO_PATRONES_GASTO[i].concepto;
-  }
-  return '';
-}
-var RE_EFECTIVO_COMPROBANTE = /\befectivo\b|\bcash\b|esp[eè]ces|现金|contado/i;
-var RE_TARJETA_COMPROBANTE = /tarjeta|\bvisa\b|mastercard|amex|american express|d[ée]bito|cr[ée]dito|credit card|debit card|carte bancaire|信用卡|刷卡|银行卡/i;
-function detectarMetodoPagoComprobante(texto){
-  // El efectivo es la excepción (la mayoría de los gastos son con tarjeta),
-  // así que solo se marca cuando el comprobante lo dice explícitamente.
-  if(RE_EFECTIVO_COMPROBANTE.test(texto)) return 'Efectivo';
-  if(RE_TARJETA_COMPROBANTE.test(texto)) return 'Tarjeta';
-  return '';
-}
-function extraerCamposComprobante(texto){
-  return {
-    fecha: detectarFechaComprobante(texto),
-    monto: detectarMontoComprobante(texto),
-    beneficiario: detectarBeneficiarioComprobante(texto),
-    ciudad: detectarCiudadComprobante(texto),
-    concepto: detectarConceptoComprobante(texto),
-    metodoPago: detectarMetodoPagoComprobante(texto)
-  };
-}
-
 /* ---------- Estado de la app ---------- */
 var STATE = {
   view:'home',
@@ -582,7 +411,7 @@ var STATE = {
   editandoTipo: null,
   correoId: null, correoAsunto:'', correoCuerpo:'', correoEmail:'', // borrador de correo de Seguimiento (Módulo 5)
   gastoForm: null, // gasto en construcción/edición (Módulo 7)
-  gastoFiltro: {concepto:'', ciudad:'', metodoPago:'', desde:'', hasta:'', texto:''},
+  gastoFiltro: {concepto:'', ciudad:'', desde:'', hasta:'', texto:''},
   muestraFiltro: {proveedor:'', linea:'', estado:''}, // Muestras (Módulo 4)
   _muestrasEncs: [],
   planExpForm: null, // expositor en construcción/edición (Módulo 1 — Planeación & Brief)
@@ -710,8 +539,8 @@ function render(){
 function viewHome(){
   return ''+
   '<div class="card">'+
-    '<h2>Intertextile SH + Texworld/PV Paris</h2>'+
-    '<p class="muted">25-27 ago (Shanghái) · 1-4 sept (París) 2026</p>'+
+    '<h2>ColombiaModa 2026</h2>'+
+    '<p class="muted">28-30 de julio · Medellín — primera puesta en producción de esta herramienta.</p>'+
     '<div class="grid2">'+
       '<div class="card" style="text-align:center"><div style="font-size:26px;font-weight:800;color:var(--navy)" id="cEnc">–</div><div class="muted">Encuentros</div></div>'+
       '<div class="card" style="text-align:center"><div style="font-size:26px;font-weight:800;color:var(--navy)" id="cVis">–</div><div class="muted">Visitas a almacén</div></div>'+
@@ -1078,10 +907,8 @@ var MONEDAS_GASTO = ['COP','USD','EUR','GBP'];
 
 function nuevoGasto(){
   var hoy = new Date().toISOString().slice(0,10);
-  // Por defecto Tarjeta, porque es el medio de pago que más usas — se cambia
-  // con un toque cuando el gasto sea en efectivo.
   return { id:uid(), estado:'completo', ciudad:'', fecha:hoy, concepto:CONCEPTOS_GASTO[0],
-    beneficiario:'', detalle:'', valor:'', moneda:'COP', metodoPago:'Tarjeta', foto:null,
+    beneficiario:'', detalle:'', valor:'', moneda:'COP', foto:null,
     fecha_creacion:Date.now(), fecha_edicion:Date.now(), _esNuevo:true };
 }
 function aplicarFiltroGastos(all){
@@ -1089,7 +916,6 @@ function aplicarFiltroGastos(all){
   return all.filter(function(g){
     if(f.concepto && g.concepto!==f.concepto) return false;
     if(f.ciudad && g.ciudad!==f.ciudad) return false;
-    if(f.metodoPago && (g.metodoPago||'Tarjeta')!==f.metodoPago) return false;
     if(f.desde && (g.fecha||'') < f.desde) return false;
     if(f.hasta && (g.fecha||'') > f.hasta) return false;
     if(f.texto){
@@ -1100,34 +926,12 @@ function aplicarFiltroGastos(all){
     return true;
   });
 }
-function sincronizarGastoFormDesdeDOM(g){
-  // Guarda en el objeto lo que el usuario ya haya escrito a mano antes de que
-  // termine la lectura automática, para no perderlo al volver a pintar el formulario.
-  if(document.getElementById('fCiudad')) g.ciudad = val('fCiudad');
-  if(document.getElementById('fFecha')) g.fecha = val('fFecha');
-  if(document.getElementById('fConcepto')) g.concepto = val('fConcepto');
-  if(document.getElementById('fBeneficiario')) g.beneficiario = val('fBeneficiario');
-  if(document.getElementById('fDetalle')) g.detalle = val('fDetalle');
-  if(document.getElementById('fValor')) g.valor = val('fValor');
-  if(document.getElementById('fMoneda')) g.moneda = val('fMoneda');
-}
 function subtotalesPorMoneda(list){
   var out = {};
   list.forEach(function(g){
     var m = g.moneda || '?';
     var v = parseFloat(g.valor) || 0;
     out[m] = (out[m]||0) + v;
-  });
-  return out;
-}
-function subtotalesPorMetodoYMoneda(list){
-  var out = {};
-  list.forEach(function(g){
-    var mp = g.metodoPago || 'Tarjeta';
-    var mo = g.moneda || '?';
-    var v = parseFloat(g.valor) || 0;
-    out[mp] = out[mp] || {};
-    out[mp][mo] = (out[mp][mo]||0) + v;
   });
   return out;
 }
@@ -1156,11 +960,6 @@ function viewGastoForm(g){
       '<div><label class="small">Valor</label><input type="number" step="0.01" id="fValor" value="'+escapeHtml(String(g.valor==null?'':g.valor))+'"></div>'+
       '<div><label class="small">Moneda</label><select id="fMoneda">'+MONEDAS_GASTO.map(function(m){return '<option '+(g.moneda===m?'selected':'')+'>'+m+'</option>';}).join('')+'</select></div>'+
     '</div>'+
-    '<label class="small">Método de pago</label>'+
-    '<div class="track">'+
-      '<button type="button" class="'+((g.metodoPago||'Tarjeta')==='Tarjeta'?'sel':'')+'" data-metodopago="Tarjeta">💳 Tarjeta</button>'+
-      '<button type="button" class="'+((g.metodoPago||'Tarjeta')==='Efectivo'?'sel':'')+'" data-metodopago="Efectivo">💵 Efectivo</button>'+
-    '</div>'+
   '</div>'+
   '<div class="wizard-nav">'+
     '<button class="sec" id="btnCancelarGasto">Cancelar</button>'+
@@ -1181,12 +980,6 @@ function renderGastos(app){
         '<select id="fFiltroConcepto"><option value="">Concepto: todos</option>'+CONCEPTOS_GASTO.map(function(c){return '<option '+(f.concepto===c?'selected':'')+'>'+c+'</option>';}).join('')+'</select>'+
         '<select id="fFiltroCiudad"><option value="">Ciudad: todas</option></select>'+
       '</div>'+
-      '<select id="fFiltroMetodoPago">'+
-        '<option value="">Pago: todos</option>'+
-        '<option value="Tarjeta" '+(f.metodoPago==='Tarjeta'?'selected':'')+'>💳 Solo Tarjeta</option>'+
-        '<option value="Efectivo" '+(f.metodoPago==='Efectivo'?'selected':'')+'>💵 Solo Efectivo</option>'+
-      '</select>'+
-      '<p class="muted" style="font-size:11px;margin:2px 0 8px">Filtra por Tarjeta o Efectivo antes de exportar para tener los dos reportes por separado.</p>'+
       '<div class="grid2">'+
         '<div><label class="small">Desde</label><input type="date" id="fFiltroDesde" value="'+escapeHtml(f.desde)+'"></div>'+
         '<div><label class="small">Hasta</label><input type="date" id="fFiltroHasta" value="'+escapeHtml(f.hasta)+'"></div>'+
@@ -1209,10 +1002,8 @@ function renderGastos(app){
     var filtrados = aplicarFiltroGastos(all);
     filtrados.sort(function(a,b){ return (b.fecha||'').localeCompare(a.fecha||''); });
     var subt = subtotalesPorMoneda(filtrados);
-    var subtMP = subtotalesPorMetodoYMoneda(filtrados);
     var rowsHtml = filtrados.map(function(g){
       var local = esCiudadLocal(g.ciudad);
-      var mp = g.metodoPago || 'Tarjeta';
       var valorFmt = (g.valor!=null && g.valor!=='')? Number(g.valor).toLocaleString('es-CO',{minimumFractionDigits:2}) : '';
       return '<tr>'+
         '<td>'+escapeHtml(g.fecha||'')+'</td>'+
@@ -1222,24 +1013,17 @@ function renderGastos(app){
         '<td>'+escapeHtml(g.detalle||'')+'</td>'+
         '<td style="text-align:right">'+valorFmt+'</td>'+
         '<td>'+escapeHtml(g.moneda||'')+'</td>'+
-        '<td>'+(mp==='Efectivo'?'💵':'💳')+' '+mp+'</td>'+
         '<td><button class="ghost" data-editgasto="'+g.id+'" style="font-size:11px;padding:4px 6px">✏️</button> <button class="ghost danger" data-delgasto="'+g.id+'" style="font-size:11px;padding:4px 6px">🗑️</button></td>'+
       '</tr>';
     }).join('');
     var subtHtml = Object.keys(subt).map(function(m){
       return '<p><strong>Subtotal '+m+':</strong> '+subt[m].toLocaleString('es-CO',{minimumFractionDigits:2})+'</p>';
     }).join('');
-    var subtMPHtml = Object.keys(subtMP).map(function(mp){
-      var monedas = subtMP[mp];
-      var partes = Object.keys(monedas).map(function(mo){ return monedas[mo].toLocaleString('es-CO',{minimumFractionDigits:2})+' '+mo; }).join(' + ');
-      return '<p>'+(mp==='Efectivo'?'💵':'💳')+' <strong>'+mp+':</strong> '+partes+'</p>';
-    }).join('');
     var body = document.getElementById('gastosBody');
     if(body) body.innerHTML = ''+
       '<div class="card">'+
-        (filtrados.length? '<table><tr><th>Fecha</th><th>Ciudad</th><th>Concepto</th><th>Beneficiario</th><th>Detalle</th><th>Valor</th><th>Moneda</th><th>Pago</th><th></th></tr>'+rowsHtml+'</table>' : '<p class="muted">Sin gastos que coincidan con el filtro.</p>')+
-        '<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">'+(subtHtml||'<p class="muted">Sin subtotal.</p>')+'</div>'+
-        '<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px">'+(subtMPHtml||'')+'<p class="muted">'+filtrados.length+' gasto(s)</p></div>'+
+        (filtrados.length? '<table><tr><th>Fecha</th><th>Ciudad</th><th>Concepto</th><th>Beneficiario</th><th>Detalle</th><th>Valor</th><th>Moneda</th><th></th></tr>'+rowsHtml+'</table>' : '<p class="muted">Sin gastos que coincidan con el filtro.</p>')+
+        '<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">'+(subtHtml||'<p class="muted">Sin subtotal.</p>')+'<p class="muted">'+filtrados.length+' gasto(s)</p></div>'+
       '</div>';
   });
 }
@@ -1248,35 +1032,8 @@ function wireGastos(){
     var g = STATE.gastoForm;
     var fFoto = document.getElementById('fotoGasto');
     if(fFoto) fFoto.onchange = function(){
-      if(fFoto.files && fFoto.files[0]) compressImage(fFoto.files[0], function(d){
-        g.foto=d; render();
-        toast('Leyendo comprobante…', 8000);
-        leerComprobanteGasto(d, function(campos){
-          var actual = STATE.gastoForm;
-          if(!actual || actual.id!==g.id) return; // el usuario canceló o cambió de gasto mientras tanto
-          sincronizarGastoFormDesdeDOM(actual);
-          if(!campos){ toast('No se pudo leer automáticamente — completa a mano.'); return; }
-          var huboSugerencia = false;
-          if(!actual.ciudad && campos.ciudad){ actual.ciudad = campos.ciudad; huboSugerencia = true; }
-          if(campos.fecha){ actual.fecha = campos.fecha; huboSugerencia = true; }
-          if(!actual.beneficiario && campos.beneficiario){ actual.beneficiario = campos.beneficiario; huboSugerencia = true; }
-          if(!actual.valor && campos.monto!=null){ actual.valor = campos.monto; huboSugerencia = true; }
-          if(campos.concepto){ actual.concepto = campos.concepto; huboSugerencia = true; }
-          // Solo cambia a Efectivo si el comprobante lo dice explícitamente —
-          // nunca lo devuelve a Tarjeta (así no pisa una elección tuya).
-          if(campos.metodoPago==='Efectivo'){ actual.metodoPago = 'Efectivo'; huboSugerencia = true; }
-          toast(huboSugerencia? 'Datos sugeridos — revisa antes de guardar ✓' : 'No se detectaron datos — completa a mano.', 5000);
-          render();
-        });
-      });
+      if(fFoto.files && fFoto.files[0]) compressImage(fFoto.files[0], function(d){ g.foto=d; render(); });
     };
-    Array.prototype.forEach.call(document.querySelectorAll('[data-metodopago]'), function(btn){
-      btn.onclick = function(){
-        sincronizarGastoFormDesdeDOM(g);
-        g.metodoPago = btn.getAttribute('data-metodopago');
-        render();
-      };
-    });
     on('btnCancelarGasto', function(){ STATE.gastoForm=null; render(); });
     on('btnGuardarGasto', function(){
       g.ciudad = val('fCiudad'); g.fecha = val('fFecha'); g.concepto = val('fConcepto');
@@ -1294,13 +1051,12 @@ function wireGastos(){
     return;
   }
   on('btnNuevoGasto', function(){ STATE.gastoForm = nuevoGasto(); render(); });
-  on('btnLimpiarFiltroGastos', function(){ STATE.gastoFiltro = {concepto:'',ciudad:'',metodoPago:'',desde:'',hasta:'',texto:''}; render(); });
-  ['fFiltroConcepto','fFiltroCiudad','fFiltroMetodoPago','fFiltroDesde','fFiltroHasta'].forEach(function(id){
+  on('btnLimpiarFiltroGastos', function(){ STATE.gastoFiltro = {concepto:'',ciudad:'',desde:'',hasta:'',texto:''}; render(); });
+  ['fFiltroConcepto','fFiltroCiudad','fFiltroDesde','fFiltroHasta'].forEach(function(id){
     var el = document.getElementById(id);
     if(el) el.onchange = function(){
       STATE.gastoFiltro.concepto = val('fFiltroConcepto');
       STATE.gastoFiltro.ciudad = val('fFiltroCiudad');
-      STATE.gastoFiltro.metodoPago = val('fFiltroMetodoPago');
       STATE.gastoFiltro.desde = val('fFiltroDesde');
       STATE.gastoFiltro.hasta = val('fFiltroHasta');
       render();
@@ -1315,8 +1071,8 @@ function exportarGastosCSV(){
   dbGetAll('gastos', function(all){
     var filtrados = aplicarFiltroGastos(all);
     filtrados.sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); });
-    var rows = [['Fecha','Ciudad','Concepto','Beneficiario','Detalle','Valor','Moneda','Método de pago']];
-    filtrados.forEach(function(g){ rows.push([g.fecha||'', g.ciudad||'', g.concepto||'', g.beneficiario||'', g.detalle||'', g.valor||'', g.moneda||'', g.metodoPago||'Tarjeta']); });
+    var rows = [['Fecha','Ciudad','Concepto','Beneficiario','Detalle','Valor','Moneda']];
+    filtrados.forEach(function(g){ rows.push([g.fecha||'', g.ciudad||'', g.concepto||'', g.beneficiario||'', g.detalle||'', g.valor||'', g.moneda||'']); });
     var csv = rows.map(function(r){
       return r.map(function(c){
         var s = (c==null? '' : String(c));
@@ -1327,8 +1083,7 @@ function exportarGastosCSV(){
     var blob = new Blob(["\ufeff"+csv], {type:'text/csv;charset=utf-8;'});
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    var sufijoPago = STATE.gastoFiltro.metodoPago? ('_'+STATE.gastoFiltro.metodoPago) : '';
-    a.download = 'Relacion_Gastos'+sufijoPago+'_'+(new Date().toISOString().slice(0,10))+'.csv';
+    a.download = 'Relacion_Gastos_'+(new Date().toISOString().slice(0,10))+'.csv';
     document.body.appendChild(a); a.click(); a.remove();
     toast("Excel (CSV) descargado.");
   });
@@ -1337,8 +1092,8 @@ function exportarGastosPDF(){
   toast("Generando PDF…", 4000);
   function withLibs(cb){
     if(window.jspdf && window.html2canvas) return cb();
-    var s1=document.createElement('script'); s1.src="./jspdf.umd.min.js";
-    var s2=document.createElement('script'); s2.src="./html2canvas.min.js";
+    var s1=document.createElement('script'); s1.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    var s2=document.createElement('script'); s2.src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
     var loaded=0; function done(){ loaded++; if(loaded===2) cb(); }
     s1.onload=done; s2.onload=done;
     s1.onerror=s2.onerror=function(){ toast("Sin señal para generar el PDF — intenta con wifi."); };
@@ -1351,11 +1106,9 @@ function exportarGastosPDF(){
       var pdf = new window.jspdf.jsPDF({unit:'pt', format:'a4'});
       var pageW = pdf.internal.pageSize.getWidth();
       var ratio = pageW / canvas.width;
-      var etiquetaPago = STATE.gastoFiltro.metodoPago? (' — '+STATE.gastoFiltro.metodoPago) : '';
-      pdf.text("Relación de Gastos"+etiquetaPago+" ("+fmtFecha(Date.now())+")", 24, 24);
+      pdf.text("Relación de Gastos ("+fmtFecha(Date.now())+")", 24, 24);
       pdf.addImage(img, 'JPEG', 20, 36, canvas.width*ratio-40, canvas.height*ratio-40);
-      var sufijoPago = STATE.gastoFiltro.metodoPago? ('_'+STATE.gastoFiltro.metodoPago) : '';
-      pdf.save('Relacion_Gastos'+sufijoPago+'_'+(new Date().toISOString().slice(0,10))+'.pdf');
+      pdf.save('Relacion_Gastos_'+(new Date().toISOString().slice(0,10))+'.pdf');
       toast("PDF descargado ✓");
     }).catch(function(){ toast("No se pudo generar el PDF."); });
   });
@@ -2401,8 +2154,8 @@ function exportarPDF(){
   toast("Generando PDF…", 4000);
   function withLibs(cb){
     if(window.jspdf && window.html2canvas) return cb();
-    var s1=document.createElement('script'); s1.src="./jspdf.umd.min.js";
-    var s2=document.createElement('script'); s2.src="./html2canvas.min.js";
+    var s1=document.createElement('script'); s1.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    var s2=document.createElement('script'); s2.src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
     var loaded=0; function done(){ loaded++; if(loaded===2) cb(); }
     s1.onload=done; s2.onload=done;
     s1.onerror=s2.onerror=function(){ toast("Sin señal para generar el PDF — intenta con wifi."); };
@@ -2718,17 +2471,6 @@ if(window.visualViewport){
   ajustarEspacioNavbar();
   openDB(function(){ recuperarBorradores(function(){ render(); ajustarEspacioNavbar(); }); });
 })();
-
-/* ---------- Modo sin internet (service worker) ----------
-   Guarda una copia de la app en el celular la primera vez que se abre con
-   wifi/datos, para que funcione sin internet después (feria, avión, país
-   con restricciones de red como China). Los datos capturados no dependen
-   de esto — viven aparte, en IndexedDB. */
-if('serviceWorker' in navigator){
-  window.addEventListener('load', function(){
-    navigator.serviceWorker.register('./sw.js').catch(function(){});
-  });
-}
 </script>
 </body>
 </html>
