@@ -13,7 +13,7 @@
    este archivo con CACHE_NAME incrementado (v1 -> v2, etc.) para forzar a
    que el celular descargue la versión nueva la próxima vez que haya wifi. */
 
-var CACHE_NAME = 'ferias-shell-v6';
+var CACHE_NAME = 'ferias-shell-v7';
 var ARCHIVOS_ESENCIALES = [
   './',
   './index.html',
