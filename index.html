@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Ferias">
@@ -96,17 +96,24 @@ header.top button.icon{
 .navbar{
   position:fixed; bottom:0; left:0; right:0; background:var(--navy); display:flex;
   z-index:30; box-shadow:0 -2px 10px rgba(0,0,0,.2);
-  padding-bottom:0;
-  padding-bottom:env(safe-area-inset-bottom, 0px);
+  /* FIX real del bug "el swipe lateral saca de la app": el causante no era
+     solo el gesto de "volver atrás" de Safari — en el ícono de pantalla de
+     inicio (modo standalone) iOS reserva una franja pegada al borde físico
+     inferior para el gesto de "cambiar de app" (deslizar lateral en el
+     borde), y ningún CSS puede vencer un gesto de sistema. Sin
+     viewport-fit=cover en el <meta viewport> (ver <head>), env(safe-area-
+     inset-bottom) siempre valía 0px, así que el menú quedaba pegado
+     exactamente en esa franja. Con viewport-fit=cover, el inset real del
+     iPhone (~34px en modelos con Face ID) sí se aplica, más 8px extra de
+     colchón — los botones quedan por ENCIMA de la franja de gesto y dejan
+     de competir con el sistema. */
+  padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 8px);
   /* Con 10 pestañas ya no caben todas apretadas — en vez de encogerlas
      hasta ilegibles, se deja la barra desplazable horizontalmente (como
      un carrusel) y cada botón conserva un ancho mínimo cómodo de tocar. */
   overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;
-  /* BUG deslizar sacaba de la app: sin esto, el navegador interpreta el
-     deslizamiento lateral sobre el menú como el gesto nativo de "volver
-     atrás" (edge-swipe) en vez de como scroll dentro del menú. Con
-     touch-action:pan-x le decimos al navegador que el único gesto válido
-     aquí es paneo horizontal — deja de robarse el swipe. */
+  /* Además, dentro de la barra: que el deslizamiento lateral se interprete
+     como scroll del menú y no como gesto de "volver atrás" del navegador. */
   touch-action:pan-x; overscroll-behavior-x:contain;
 }
 .navbar::-webkit-scrollbar{ display:none; }
