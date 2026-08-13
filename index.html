@@ -76,7 +76,7 @@ header.top button.icon{
 .stepbar div{flex:1; height:5px; border-radius:3px; background:var(--line)}
 .stepbar div.done{background:var(--teal)}
 .stepbar div.now{background:var(--navy)}
-.thumbrow{display:flex; gap:8px; overflow-x:auto; padding:4px 0}
+.thumbrow{display:flex; gap:8px; overflow-x:auto; padding:4px 0; touch-action:pan-x; overscroll-behavior-x:contain}
 .thumb{position:relative; width:74px; height:74px; border-radius:8px; overflow:hidden; flex:none; border:1.5px solid var(--line)}
 .thumb img{width:100%; height:100%; object-fit:cover}
 .thumb .imp{position:absolute; top:2px; left:2px; background:var(--teal); color:#06251f; font-size:9px; font-weight:800; padding:1px 5px; border-radius:6px}
@@ -99,6 +99,12 @@ header.top button.icon{
      hasta ilegibles, se deja la barra desplazable horizontalmente (como
      un carrusel) y cada botón conserva un ancho mínimo cómodo de tocar. */
   overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+  /* BUG deslizar sacaba de la app: sin esto, el navegador interpreta el
+     deslizamiento lateral sobre el menú como el gesto nativo de "volver
+     atrás" (edge-swipe) en vez de como scroll dentro del menú. Con
+     touch-action:pan-x le decimos al navegador que el único gesto válido
+     aquí es paneo horizontal — deja de robarse el swipe. */
+  touch-action:pan-x; overscroll-behavior-x:contain;
 }
 .navbar::-webkit-scrollbar{ display:none; }
 .navbar::after{
@@ -203,7 +209,8 @@ body.unlocked #lockScreen{ display:none !important; }
 
 <div class="navbar">
   <button data-view="home" class="active"><span class="ic">🏠</span>Inicio</button>
-  <button data-view="planeacion"><span class="ic">🎯</span>Planeación</button>
+  <button data-view="objetivos"><span class="ic">🎯</span>Objetivos</button>
+  <button data-view="planeacion"><span class="ic">🗺️</span>Planeación</button>
   <button data-view="dossier"><span class="ic">🧳</span>Dossier</button>
   <button data-view="encuentro"><span class="ic">🤝</span>Encuentro</button>
   <button data-view="almacen"><span class="ic">🏬</span>Mercado</button>
@@ -511,30 +518,93 @@ var CIUDADES_CONOCIDAS_GASTO = [
   {nombre:'Medellín', re:/medell[íi]n/i},
   {nombre:'Bogotá', re:/bogot[áa]/i},
   {nombre:'Cali', re:/\bcali\b/i},
+  {nombre:'Cúcuta', re:/c[úu]cuta/i},
+  {nombre:'Bucaramanga', re:/bucaramanga/i},
+  {nombre:'Pereira', re:/\bpereira\b/i},
+  {nombre:'Barranquilla', re:/barranquilla/i},
   {nombre:'Shanghái', re:/shanghai|shangh[áa]i|上\s*海/i},
-  {nombre:'París', re:/\bparis\b|par[íi]s/i}
+  {nombre:'Pekín', re:/beijing|pek[íi]n|北\s*京/i},
+  {nombre:'Shenzhen', re:/shenzhen|深\s*圳/i},
+  {nombre:'Guangzhou', re:/guangzhou|广\s*州/i},
+  {nombre:'Hong Kong', re:/hong\s*kong|香\s*港/i},
+  {nombre:'París', re:/\bparis\b|par[íi]s/i},
+  {nombre:'Londres', re:/\blondon\b|londres/i},
+  {nombre:'Milán', re:/\bmilano\b|mil[áa]n/i},
+  {nombre:'Istambul', re:/istanbul|istambul/i}
 ];
 var CONCEPTO_PATRONES_GASTO = [
-  {concepto:'Transporte', re:/taxi|uber|didi|grab|metro\b|地铁|出租车|\btrain\b|gare|aeropuerto|airport|airlines|aerol[íi]nea/i},
+  {concepto:'Transporte', re:/taxi|uber|didi|grab|metro\b|地铁|出租车|\btrain\b|gare|aeropuerto|airport|airlines|aerol[íi]nea|eurostar|sncf/i},
   {concepto:'Alojamiento', re:/hotel|hostal|hostel|booking|agoda|酒店|auberge/i},
   {concepto:'Restaurantes', re:/restaurant|resto\b|bistro|饭店|餐厅|almuerzo|\bcena\b|dinner|lunch/i},
   {concepto:'Refrigerios', re:/caf[ée]|coffee|snack|bakery|panader[íi]a|咖啡/i},
   {concepto:'Muestras', re:/\btela\b|fabric|textile|sample|muestra/i}
 ];
-var LINEAS_IGNORAR_BENEFICIARIO = /^(recibo|receipt|factura|invoice|ticket|gracias|thank you|merci|谢谢|发票|收据|nit\b|ruc\b|tel[:.]?|www\.|http)/i;
+/* Líneas que NUNCA son el nombre del beneficiario, aunque aparezcan de primeras
+   en el comprobante: encabezados de tipo de documento, número de factura/orden,
+   NIT/RUC, teléfono, web, agradecimientos, Y direcciones (calle/avenida/rue/...).
+   Antes solo se ignoraban 3-4 casos — en la práctica (factura colombiana típica,
+   con "FACTURA...", "No. XXXX", "NIT..." y la dirección ANTES del nombre del
+   negocio) eso deja pasar la línea de número de factura o la dirección como si
+   fuera el nombre — confirmado con pruebas reales antes de este cambio. */
+var LINEAS_IGNORAR_BENEFICIARIO = /^(recibo|receipt|factura|invoice|ticket|gracias|thank you|merci|谢谢|发票|收据|nit\b|ruc\b|rut\b|tel[:.]?|cel[:.]?|www\.|http|no\.?\s*[:.]?\s*\w|nro\.?|n[uú]mero\s|order\s*no|ref\.?\s|c[oó]digo\s|fecha\s*[:.]|date\s*[:.]|hora\s*[:.]|mesa\s|table\s|calle\b|avenida\b|avda\.?\b|carrera\b|\bcra\.?\b|diagonal\b|transversal\b|street\b|road\b|rue\b|jalan\b)/i;
+/* Una línea con muchos dígitos casi nunca es el nombre del negocio (es un
+   número de factura, NIT, teléfono o dirección con nomenclatura) — aunque no
+   haya caído en la lista de arriba. */
+function proporcionDigitos(l){
+  var digitos = (l.match(/\d/g)||[]).length;
+  return l.length? digitos/l.length : 0;
+}
 
 function pad2(v){ v=String(v); return v.length<2? '0'+v : v; }
 
+var MESES_TEXTO = {
+  ene:1,enero:1,jan:1,january:1,janv:1,janvier:1,
+  feb:2,febrero:2,february:2,fevr:2,'février':2,
+  mar:3,marzo:3,march:3,mars:3,
+  abr:4,abril:4,apr:4,april:4,avr:4,avril:4,
+  may:5,mayo:5,mai:5,
+  jun:6,junio:6,june:6,juin:6,
+  jul:7,julio:7,july:7,juil:7,juillet:7,
+  ago:8,agosto:8,aug:8,august:8,'août':8,
+  sep:9,sept:9,septiembre:9,september:9,septembre:9,
+  oct:10,octubre:10,october:10,octobre:10,
+  nov:11,noviembre:11,november:11,novembre:11,
+  dic:12,diciembre:12,dec:12,december:12,'décembre':12
+};
+function mesDesdeTexto(s){
+  s = (s||'').toLowerCase().replace(/[. ]/g,'').trim();
+  if(MESES_TEXTO[s]!=null) return MESES_TEXTO[s];
+  // probar por las 3 primeras letras (cubre abreviaturas no listadas tal cual)
+  var corto = s.slice(0,3);
+  if(MESES_TEXTO[corto]!=null) return MESES_TEXTO[corto];
+  return null;
+}
+/* Grupos de día/mes reutilizados en todos los patrones de fecha de abajo.
+   IMPORTANTE: el orden de las alternativas importa — una alternación regex
+   toma la PRIMERA opción que calce, no la más larga. Con "día 30" y el orden
+   viejo (0?[1-9] primero), el motor aceptaba solo el "3" y dejaba el "0"
+   suelto siempre que no hubiera un separador obligatorio justo después que
+   forzara a reintentar — pasaba exactamente eso en el patrón año-mes-día (el
+   día es el último grupo, sin nada obligatorio detrás). Bug real, confirmado
+   con una factura real del 30 de mayo que la app leyó como "3 de mayo".
+   Iguales para el mes en 10/11/12. Iguales para el mes en 10/11/12. */
+var DIA_RE = '(3[01]|[12]\\d|0?[1-9])';
+var MES_RE = '(1[0-2]|0?[1-9])';
 function detectarFechaComprobante(texto){
-  var m = texto.match(/(20\d{2})[-\/.](0?[1-9]|1[0-2])[-\/.](0?[1-9]|[12]\d|3[01])/);
-  if(m) return m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]);
-  m = texto.match(/(20\d{2})\s*年\s*(0?[1-9]|1[0-2])\s*月\s*(0?[1-9]|[12]\d|3[01])\s*日/);
-  if(m) return m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]);
-  m = texto.match(/(0?[1-9]|[12]\d|3[01])[-\/.](0?[1-9]|1[0-2])[-\/.](20\d{2})/);
-  if(m) return m[3]+'-'+pad2(m[2])+'-'+pad2(m[1]);
-  m = texto.match(/(0?[1-9]|[12]\d|3[01])[-\/.](0?[1-9]|1[0-2])[-\/.](\d{2})\b/);
-  if(m){ var yy=parseInt(m[3],10); var yyyy=(yy<50? 2000+yy : 1900+yy); return yyyy+'-'+pad2(m[2])+'-'+pad2(m[1]); }
-  return '';
+  var m = texto.match(new RegExp('(20\\d{2})[-\\/.]'+MES_RE+'[-\\/.]'+DIA_RE));
+  if(m) return {texto:m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]), rango:[m.index,m.index+m[0].length]};
+  m = texto.match(new RegExp('(20\\d{2})\\s*年\\s*'+MES_RE+'\\s*月\\s*'+DIA_RE+'\\s*日'));
+  if(m) return {texto:m[1]+'-'+pad2(m[2])+'-'+pad2(m[3]), rango:[m.index,m.index+m[0].length]};
+  // "13 Aug 2026" / "Aug 13, 2026" / "13 agosto 2026" / "13 août 2026"
+  m = texto.match(new RegExp(DIA_RE+'\\s+([A-Za-zÀ-ÿ.]{3,12})\\.?\\s*,?\\s+(20\\d{2})'));
+  if(m){ var mm = mesDesdeTexto(m[2]); if(mm) return {texto:m[3]+'-'+pad2(mm)+'-'+pad2(m[1]), rango:[m.index,m.index+m[0].length]}; }
+  m = texto.match(new RegExp('([A-Za-zÀ-ÿ.]{3,12})\\.?\\s+'+DIA_RE+',?\\s+(20\\d{2})'));
+  if(m){ var mm2 = mesDesdeTexto(m[1]); if(mm2) return {texto:m[3]+'-'+pad2(mm2)+'-'+pad2(m[2]), rango:[m.index,m.index+m[0].length]}; }
+  m = texto.match(new RegExp(DIA_RE+'[-\\/.]'+MES_RE+'[-\\/.](20\\d{2})'));
+  if(m) return {texto:m[3]+'-'+pad2(m[2])+'-'+pad2(m[1]), rango:[m.index,m.index+m[0].length]};
+  m = texto.match(new RegExp(DIA_RE+'[-\\/.]'+MES_RE+'[-\\/.](\\d{2})\\b'));
+  if(m){ var yy=parseInt(m[3],10); var yyyy=(yy<50? 2000+yy : 1900+yy); return {texto:yyyy+'-'+pad2(m[2])+'-'+pad2(m[1]), rango:[m.index,m.index+m[0].length]}; }
+  return {texto:'', rango:null};
 }
 function normalizarNumeroComprobante(s){
   s = s.replace(/[^\d.,]/g,'');
@@ -555,7 +625,11 @@ function normalizarNumeroComprobante(s){
   return isNaN(val)? null : val;
 }
 function extraerNumeroDeLineaComprobante(linea){
-  var re = /\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?/g;
+  // El (?:[.,]\s?\d{3})* tolera un espacio suelto después de la coma/punto
+  // (típico ruido de OCR en montos grandes, ej. "167, 000" en vez de
+  // "167,000") — sin el \s? opcional, esos dos trozos se leían como números
+  // separados (167 y 000) y el total real nunca aparecía como candidato.
+  var re = /\d{1,3}(?:[.,]\s?\d{3})*(?:[.,]\s?\d{1,2})?/g;
   var m, mejor=null;
   while((m=re.exec(linea))){
     var n = normalizarNumeroComprobante(m[0]);
@@ -564,37 +638,85 @@ function extraerNumeroDeLineaComprobante(linea){
   return mejor;
 }
 var PALABRAS_TOTAL_GASTO = ['total a pagar','total general','grand total','montant total','montant ttc','total ttc','总计','合计','amount due','import total','valor total','total'];
-function detectarMontoComprobante(texto){
-  var lineas = texto.split('\n');
+/* rangoFecha (opcional): posición [inicio,fin] donde ya se detectó la fecha en
+   el texto completo — se descarta esa porción antes de buscar el monto, para
+   que un año/día de la fecha (ej. "2026") no se cuele como si fuera el valor
+   del gasto cuando el comprobante no dice "total" en ningún lado (bug real
+   confirmado: un recibo chino sin la palabra total devolvía el año como
+   monto). */
+function detectarMontoComprobante(texto, rangoFecha){
+  var textoSinFecha = texto;
+  if(rangoFecha){
+    textoSinFecha = texto.slice(0,rangoFecha[0]) + ' '.repeat(rangoFecha[1]-rangoFecha[0]) + texto.slice(rangoFecha[1]);
+  }
+  var lineas = textoSinFecha.split('\n');
   for(var i=0;i<lineas.length;i++){
-    var linea = lineas[i].toLowerCase();
+    // Se compara sin espacios: encabezados de total suelen imprimirse con
+    // letras separadas para resaltar ("T O T A L") y el OCR las lee tal cual
+    // — comparando "totalapagar" contra la palabra sin espacios sí calza
+    // (bug real confirmado: una factura con "T O T A L .... $167,000" no
+    // encontraba la palabra "total" y terminaba tomando otro número más
+    // pequeño de la factura).
+    var lineaCompacta = lineas[i].toLowerCase().replace(/\s+/g,'');
     for(var j=0;j<PALABRAS_TOTAL_GASTO.length;j++){
-      if(linea.indexOf(PALABRAS_TOTAL_GASTO[j])>=0){
+      if(lineaCompacta.indexOf(PALABRAS_TOTAL_GASTO[j].replace(/\s+/g,''))>=0){
         var num = extraerNumeroDeLineaComprobante(lineas[i]);
         if(num!=null) return num;
       }
     }
   }
   var candidatos = [];
-  var re = /\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{1,2})?/g, m;
-  while((m=re.exec(texto))){
+  var re = /\d{1,3}(?:[.,]\s?\d{3})*(?:[.,]\s?\d{1,2})?/g, m;
+  while((m=re.exec(textoSinFecha))){
     var n = normalizarNumeroComprobante(m[0]);
+    // Se descartan números "año" sueltos (2015-2035 sin decimales) — casi
+    // siempre son restos de una fecha que el patrón de arriba no capturó
+    // completa, no el valor del gasto.
+    if(n!=null && n>=2015 && n<=2035 && m[0].indexOf('.')<0 && m[0].indexOf(',')<0) continue;
     if(n!=null && n>0 && n<10000000) candidatos.push(n);
   }
   if(!candidatos.length) return null;
   candidatos.sort(function(a,b){return b-a;});
   return candidatos[0];
 }
+/* Colapsa espacios que Tesseract mete entre caracteres chinos/japoneses
+   sueltos (ej. "上 海 国际" en vez de "上海国际") — de otro modo el nombre
+   del negocio en chino queda con espacios raros al copiarlo al campo. */
+function limpiarEspaciosCJK(s){
+  return (s||'').replace(/([一-鿿])\s+(?=[一-鿿])/g,'$1');
+}
+/* Corta lo que venga después de un NIT/RUC/identificación tributaria QUE
+   APAREZCA DENTRO de la línea del nombre — no solo cuando la línea EMPIEZA
+   así. Caso real confirmado: "ALMACENES EXITO S.A NIT 8909006089" traía
+   pegado el NIT al nombre real del negocio. */
+var RE_CORTAR_TAX_ID = /\s+(nit|ruc|rut)[\s:.\/]*\d.*$/i;
+/* Una línea sin ninguna "palabra real" (racha de al menos 4 letras seguidas)
+   casi nunca es el nombre del negocio — normalmente es ruido de OCR sobre un
+   logo o encabezado decorativo. Caso real confirmado: un logo mal leído como
+   "cL SI FA NO DI NO" (puros tokens de 1-2 letras) se coló como beneficiario
+   antes de esta regla, dejando pasar de largo el nombre real más abajo. */
+var RE_TIENE_PALABRA_REAL = /[A-Za-zÀ-ÿ一-鿿]{4,}/;
 function detectarBeneficiarioComprobante(texto){
-  var lineas = texto.split('\n').map(function(l){return l.trim();}).filter(Boolean);
-  for(var i=0;i<Math.min(lineas.length,6);i++){
+  var lineas = texto.split('\n').map(function(l){return limpiarEspaciosCJK(l.trim());}).filter(Boolean);
+  var candidatas = [];
+  for(var i=0;i<Math.min(lineas.length,10);i++){
     var l = lineas[i];
-    if(l.length<2) continue;
+    if(l.length<2 || l.length>60) continue;
     if(LINEAS_IGNORAR_BENEFICIARIO.test(l)) continue;
     if(/^[\d\s\-\/.:]+$/.test(l)) continue;
-    return l;
+    // Una línea con más de ~35% de dígitos casi nunca es el nombre del
+    // negocio (número de factura, NIT, teléfono, dirección con nomenclatura,
+    // aunque no haya calzado con ninguna de las palabras de la lista de
+    // arriba) — confirmado con pruebas reales antes de este cambio.
+    if(proporcionDigitos(l) > 0.35) continue;
+    if(!RE_TIENE_PALABRA_REAL.test(l)) continue;
+    candidatas.push({linea:l.replace(RE_CORTAR_TAX_ID,''), indice:i});
   }
-  return '';
+  if(!candidatas.length) return '';
+  // Entre las candidatas que pasaron el filtro, se prefiere la más cercana
+  // al inicio del comprobante (ahí suele ir el nombre del negocio); en caso
+  // de empate de posición no hay más criterio que ese orden.
+  return candidatas[0].linea;
 }
 function detectarCiudadComprobante(texto){
   for(var i=0;i<CIUDADES_CONOCIDAS_GASTO.length;i++){
@@ -618,13 +740,15 @@ function detectarMetodoPagoComprobante(texto){
   return '';
 }
 function extraerCamposComprobante(texto){
+  var fechaInfo = detectarFechaComprobante(texto);
   return {
-    fecha: detectarFechaComprobante(texto),
-    monto: detectarMontoComprobante(texto),
+    fecha: fechaInfo.texto,
+    monto: detectarMontoComprobante(texto, fechaInfo.rango),
     beneficiario: detectarBeneficiarioComprobante(texto),
     ciudad: detectarCiudadComprobante(texto),
     concepto: detectarConceptoComprobante(texto),
-    metodoPago: detectarMetodoPagoComprobante(texto)
+    metodoPago: detectarMetodoPagoComprobante(texto),
+    texto_ocr: texto
   };
 }
 
@@ -751,6 +875,7 @@ function render(){
     b.classList.toggle('active', b.dataset.view===STATE.view);
   });
   if(STATE.view==='home') app.innerHTML = viewHome();
+  else if(STATE.view==='objetivos') renderObjetivos(app);
   else if(STATE.view==='planeacion') renderPlaneacion(app);
   else if(STATE.view==='dossier') renderDossier(app);
   else if(STATE.view==='encuentro') app.innerHTML = viewEncuentro();
@@ -1249,6 +1374,8 @@ function viewGastoForm(g){
     '<label class="small">Foto del comprobante</label>'+
     '<input type="file" accept="image/*" capture="environment" id="fotoGasto">'+
     (g.foto? '<div class="thumb" style="width:100px;height:100px;margin-top:6px"><img class="zoomable" src="'+g.foto+'"></div>' : '<p class="muted" style="font-size:11.5px">Sin foto todavía.</p>')+
+    (g._ocrTexto? '<button type="button" class="ghost" id="btnVerOcr" style="font-size:11.5px;margin-top:6px">🔎 Ver texto leído de la foto</button>'+
+      '<pre id="ocrTextoBox" class="hidden" style="white-space:pre-wrap;font-size:11px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:6px;max-height:160px;overflow:auto">'+escapeHtml(g._ocrTexto)+'</pre>' : '')+
     '<label class="small">Ciudad</label>'+
     '<input id="fCiudad" list="listaCiudades" value="'+escapeHtml(g.ciudad)+'" placeholder="Ej: Medellín, París, Shanghái...">'+
     '<datalist id="listaCiudades"><option value="Medellín"><option value="Bogotá"><option value="Cali"><option value="París"><option value="Shanghái"></datalist>'+
@@ -1364,6 +1491,7 @@ function wireGastos(){
           if(!actual || actual.id!==g.id) return; // el usuario canceló o cambió de gasto mientras tanto
           sincronizarGastoFormDesdeDOM(actual);
           if(!campos){ toast('No se pudo leer automáticamente — completa a mano.'); return; }
+          actual._ocrTexto = campos.texto_ocr||''; // para el botón "Ver texto leído", por si algún dato quedó mal
           var huboSugerencia = false;
           if(!actual.ciudad && campos.ciudad){ actual.ciudad = campos.ciudad; huboSugerencia = true; }
           if(campos.fecha){ actual.fecha = campos.fecha; huboSugerencia = true; }
@@ -1373,7 +1501,7 @@ function wireGastos(){
           // Solo cambia a Efectivo si el comprobante lo dice explícitamente —
           // nunca lo devuelve a Tarjeta (así no pisa una elección tuya).
           if(campos.metodoPago==='Efectivo'){ actual.metodoPago = 'Efectivo'; huboSugerencia = true; }
-          toast(huboSugerencia? 'Datos sugeridos — revisa antes de guardar ✓' : 'No se detectaron datos — completa a mano.', 5000);
+          toast(huboSugerencia? 'Datos sugeridos — revisa y corrige lo que falte ✓' : 'No se detectaron datos — completa a mano (revisa "Ver texto leído").', 6000);
           render();
         });
       });
@@ -1384,6 +1512,10 @@ function wireGastos(){
         g.metodoPago = btn.getAttribute('data-metodopago');
         render();
       };
+    });
+    on('btnVerOcr', function(){
+      var box = document.getElementById('ocrTextoBox');
+      if(box) box.classList.toggle('hidden');
     });
     on('btnCancelarGasto', function(){ STATE.gastoForm=null; render(); });
     on('btnGuardarGasto', function(){
@@ -1760,7 +1892,14 @@ function feriaActivaTexto(){
    escrito ahí (solo actúa si el usuario lo pulsa). */
 var BRIEF_2027_RESUMEN = {
   "Denim": "RIGIDOS ALGODON — contratipo Bonanza (12-12.5oz, India/China); contratipo Hydra (10oz, India/China); contratipo Pandora Plus (7oz, India/China); contratipo Navona Black (11oz, India/China); rígido moda estructura (C100, 10.5-12oz, India/China); rígido moda diagonal marcada (C100, 10.5-12oz).\nRIGIDOS MEZCLA — Moda/Resto vs Cava (cotton poly, 10.5oz, ~US$1.90).\nDENIM LIVIANO — sin vacíos identificados por ahora.\nTRILOGIAS BASICAS — negra con diagonal básica (CPS, 10.5-11oz); azul/BB con cross (CPS, 10.5-11oz).\nMEZCLAS PREMIUM — cross masculino 11oz; femenina efecto alta elongación 10.5oz.\nALGODON STRETCH — masculina 11oz (98/2); femenina con efecto 10.5oz (98/2); blue black u otra tintura (10.5-11oz).\nSATINES — sin necesidades, salvo Onyx (pedido especial).\nSATINES BPT — contratipo Mojito Ecru; Satin BPT.\nDENIM PREMIUM — estructuras, bordados, resinados.",
-  "Moda Pesada": "PANTALONERIA RIGIDA (Algodón Pesado) — contratipo Serbia (Signet); poly algodón (5-7oz); poliéster 100% con carta color (5-7oz); poliéster 100% camisería (3.5oz).\nPANTALONERIA STRETCH (Algodón Pesado) — contratipo Sunflex; poli algodón con stretch carta color; FS3974 (98/2, 5oz)."
+  "Moda Pesada": "PANTALONERIA RIGIDA (Algodón Pesado) — contratipo Serbia (Signet); poly algodón (5-7oz); poliéster 100% con carta color (5-7oz); poliéster 100% camisería (3.5oz).\nPANTALONERIA STRETCH (Algodón Pesado) — contratipo Sunflex; poli algodón con stretch carta color; FS3974 (98/2, 5oz).",
+  /* Punto e Institucional: agregados 2026-08-13, tomados del Brief maestro
+     (Brief_Coleccion2027T1..._GUARDADO_20260811_20h49m.html — el único que
+     tiene las 6 líneas completas; Denim/Moda Pesada arriba ya venían de ahí
+     mismo). Moda no tiene contratipo/entrada todavía en ese Brief — sigue
+     vacía a propósito hasta que el director de línea la llene. */
+  "Punto": "PERUVIAN KNITTED COTTON (Textiles Camones, Perú) — Lycra Madrid: Jersey Full Licra 40/1 20Den Antipilling (95% Alg/5% Spandex, 180 gr/m²/162cm); Varsovia: Jersey Llano x2 cabos 30/1 Antipilling (100% Alg, 250 gr/m²/161cm) y Rib Llano 1x1 x2 cabos 30/1 Peinado Antipilling (100% Alg, 340 gr/m²/192cm); Gamuza London: Interlock Llano Booster 50/1 Antipilling (100% Alg, 200 gr/m²/160cm); Tibet: Jersey 24/1 Antipilling (100% Alg, 180 gr/m²/160cm) y Rib 1x1 24/1 Antipilling (100% Alg, 235 gr/m²/162cm); Nazca: Jersey Tacto Frío 30/1 Antipilling (100% Alg, 150 gr/m²/173cm) y Rib 1x1 Tacto Frío 30/1 Antipilling (100% Alg, 175 gr/m²/160cm); Royal: Piqué Simple Licrado 1:1 Tacto Frío 30/1+40Den Antipilling (96% Alg/4% Spandex, 200 gr/m²/165cm).",
+  "Institucional": "HEAVY WORKWEAR — Iliada con High Visibility.\nANTI FLUIDS — versión Non Stretch; versión Stretch.\nOTROS — Lino 9000 Textilia; Piqué Institucional (P100/PC 65/35)."
 };
 function slug(s){
   return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
@@ -1809,13 +1948,65 @@ function viewExpositorForm(x){
   '</div>'+
   (x._esNuevo? '' : '<button class="danger" id="btnBorrarExpForm" style="width:100%;margin-top:10px">🗑️ Eliminar este expositor</button>');
 }
+/* ---------- Objetivos por línea (pestaña propia, separada de Planeación
+   desde 2026-08-13 — antes vivía enterrada arriba de Planeación y era fácil
+   no verla). Formato simple a propósito: una tarjeta por línea, pensada para
+   tomar captura de pantalla y mandarla o imprimirla, sin nada más alrededor. */
+function renderObjetivos(app){
+  var feria = feriaActivaTexto();
+  app.innerHTML = ''+
+    '<h2>Objetivos por línea</h2>'+
+    '<p class="muted">Feria activa: <strong>'+escapeHtml(feria)+'</strong> — qué buscar en esta feria, línea por línea. El botón "Cargar del Brief 2027" trae el resumen ya diligenciado con los directores de línea; no borra lo que hayas escrito hasta que lo pulses.</p>'+
+    '<div id="objetivosBody"><p class="muted">Cargando…</p></div>';
+
+  dbGetAll('planeacion', function(all){
+    var objetivos = all.filter(function(x){ return x.tipo==='objetivo' && x.feria===feria; });
+    var objBox = document.getElementById('objetivosBody');
+    if(!objBox) return;
+    objBox.innerHTML = LINEAS_SOURCING.map(function(linea){
+        var rec = objetivos.filter(function(o){ return o.linea===linea; })[0];
+        var texto = rec? rec.texto : '';
+        var tieneBrief = !!BRIEF_2027_RESUMEN[linea];
+        return '<div class="card"><h3>'+linea+'</h3>'+
+          '<textarea data-objlinea="'+linea+'" placeholder="Qué buscamos en '+linea+' en esta feria...">'+escapeHtml(texto)+'</textarea>'+
+          (tieneBrief? '<button class="ghost" data-cargarbrief="'+linea+'" style="font-size:12px;margin:-4px 0 4px">📋 Cargar del Brief 2027</button>' : '<p class="muted" style="font-size:11.5px;margin:-4px 0 4px">Sin resumen del Brief 2027 todavía para esta línea.</p>')+
+        '</div>';
+      }).join('')+
+      '<button class="teal" id="btnGuardarObjetivos" style="width:100%">✓ Guardar objetivos</button>';
+    objBox.querySelectorAll('[data-cargarbrief]').forEach(function(btn){
+      btn.onclick = function(){
+        var linea = btn.getAttribute('data-cargarbrief');
+        var ta = objBox.querySelector('[data-objlinea="'+linea+'"]');
+        if(!ta) return;
+        if(ta.value.trim()){
+          customConfirm('Ya hay texto escrito en '+linea+'. ¿Reemplazarlo con el resumen del Brief 2027?', function(){
+            ta.value = BRIEF_2027_RESUMEN[linea];
+          });
+        } else {
+          ta.value = BRIEF_2027_RESUMEN[linea];
+        }
+      };
+    });
+    var btnObj = document.getElementById('btnGuardarObjetivos');
+    if(btnObj) btnObj.onclick = function(){
+      var pend = LINEAS_SOURCING.length;
+      if(!pend){ toast('Objetivos guardados ✓'); return; }
+      LINEAS_SOURCING.forEach(function(linea){
+        var ta = objBox.querySelector('[data-objlinea="'+linea+'"]');
+        var rec = nuevoObjetivoRec(feria, linea);
+        rec.texto = ta? ta.value : '';
+        dbPut('planeacion', rec, function(){ pend--; if(pend===0) toast('Objetivos guardados ✓'); });
+      });
+    };
+  });
+}
+function wireObjetivos(){}
 function renderPlaneacion(app){
   if(STATE.planExpForm){ app.innerHTML = viewExpositorForm(STATE.planExpForm); return; }
   var feria = feriaActivaTexto();
   app.innerHTML = ''+
-    '<h2>Planeación & Brief</h2>'+
-    '<p class="muted">Feria activa: <strong>'+escapeHtml(feria)+'</strong> — objetivos por línea, listado de expositores y plan de visita.</p>'+
-    '<div id="objetivosBody"><p class="muted">Cargando objetivos…</p></div>'+
+    '<h2>Planeación</h2>'+
+    '<p class="muted">Feria activa: <strong>'+escapeHtml(feria)+'</strong> — listado de expositores y plan de visita. Los objetivos por línea están en la pestaña 🎯 Objetivos.</p>'+
     '<div class="card">'+
       '<label class="small">Cargar expositores (pega la lista: nombre, hall, stand — separados por tab, coma o " - ", una fila por expositor)</label>'+
       '<textarea id="fBulkExpositores" placeholder="Ej: Kukrer, Hall 3, B12"></textarea>'+
@@ -1828,48 +2019,6 @@ function renderPlaneacion(app){
     '<div id="expositoresBody"><p class="muted">Cargando…</p></div>';
 
   dbGetAll('planeacion', function(all){
-    var objetivos = all.filter(function(x){ return x.tipo==='objetivo' && x.feria===feria; });
-    var objBox = document.getElementById('objetivosBody');
-    if(objBox){
-      objBox.innerHTML = '<div class="card"><h3>Objetivos por línea</h3>'+
-        '<p class="muted">El botón "Cargar del Brief 2027" trae el resumen de vacíos a cubrir ya diligenciado con los directores de línea — no borra lo que ya hayas escrito aquí hasta que lo pulses.</p>'+
-        LINEAS_SOURCING.map(function(linea){
-          var rec = objetivos.filter(function(o){ return o.linea===linea; })[0];
-          var texto = rec? rec.texto : '';
-          var tieneBrief = !!BRIEF_2027_RESUMEN[linea];
-          return '<label class="small">'+linea+'</label>'+
-            '<textarea data-objlinea="'+linea+'" placeholder="Qué buscamos en '+linea+' en esta feria...">'+escapeHtml(texto)+'</textarea>'+
-            (tieneBrief? '<button class="ghost" data-cargarbrief="'+linea+'" style="font-size:12px;margin:-6px 0 10px">📋 Cargar del Brief 2027</button>' : '');
-        }).join('')+
-        '<button class="teal" id="btnGuardarObjetivos" style="width:100%">✓ Guardar objetivos</button>'+
-      '</div>';
-      objBox.querySelectorAll('[data-cargarbrief]').forEach(function(btn){
-        btn.onclick = function(){
-          var linea = btn.getAttribute('data-cargarbrief');
-          var ta = objBox.querySelector('[data-objlinea="'+linea+'"]');
-          if(!ta) return;
-          if(ta.value.trim()){
-            customConfirm('Ya hay texto escrito en '+linea+'. ¿Reemplazarlo con el resumen del Brief 2027?', function(){
-              ta.value = BRIEF_2027_RESUMEN[linea];
-            });
-          } else {
-            ta.value = BRIEF_2027_RESUMEN[linea];
-          }
-        };
-      });
-      var btnObj = document.getElementById('btnGuardarObjetivos');
-      if(btnObj) btnObj.onclick = function(){
-        var pend = LINEAS_SOURCING.length;
-        if(!pend){ toast('Objetivos guardados ✓'); return; }
-        LINEAS_SOURCING.forEach(function(linea){
-          var ta = objBox.querySelector('[data-objlinea="'+linea+'"]');
-          var rec = nuevoObjetivoRec(feria, linea);
-          rec.texto = ta? ta.value : '';
-          dbPut('planeacion', rec, function(){ pend--; if(pend===0) toast('Objetivos guardados ✓'); });
-        });
-      };
-    }
-
     var expositores = all.filter(function(x){ return x.tipo==='expositor' && x.feria===feria; });
     var expBody = document.getElementById('expositoresBody');
     if(expBody){
@@ -2247,6 +2396,7 @@ function wireView(){
     on('goRegistros', function(){ setView('registros'); });
     on('goRespaldo', respaldoUI);
   }
+  else if(STATE.view==='objetivos') wireObjetivos();
   else if(STATE.view==='planeacion') wirePlaneacion();
   else if(STATE.view==='dossier') wireDossier();
   else if(STATE.view==='encuentro') wireEncuentro();

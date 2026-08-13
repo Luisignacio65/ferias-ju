@@ -1,4 +1,3 @@
-
 /* Service Worker — Ferias Captura de Campo
    Objetivo: que la app cargue y funcione SIN internet después de la primera
    vez que se abre con wifi/datos — para usarla en países con restricciones
@@ -14,7 +13,7 @@
    este archivo con CACHE_NAME incrementado (v1 -> v2, etc.) para forzar a
    que el celular descargue la versión nueva la próxima vez que haya wifi. */
 
-var CACHE_NAME = 'ferias-shell-v5';
+var CACHE_NAME = 'ferias-shell-v6';
 var ARCHIVOS_ESENCIALES = [
   './',
   './index.html',
