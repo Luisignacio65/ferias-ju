@@ -814,7 +814,7 @@ var STATE = {
   editandoTipo: null,
   correoId: null, correoAsunto:'', correoCuerpo:'', correoEmail:'', // borrador de correo de Seguimiento (Módulo 5)
   gastoForm: null, // gasto en construcción/edición (Módulo 7)
-  gastoFiltro: {concepto:'', ciudad:'', metodoPago:'', desde:'', hasta:'', texto:''},
+  gastoFiltro: {concepto:'', ciudad:'', metodoPago:'', texto:''},
   muestraFiltro: {proveedor:'', linea:'', estado:''}, // Muestras (Módulo 4)
   _muestrasEncs: [],
   planExpForm: null, // expositor en construcción/edición (Módulo 1 — Planeación & Brief)
@@ -1384,8 +1384,6 @@ function aplicarFiltroGastos(all){
     if(f.concepto && g.concepto!==f.concepto) return false;
     if(f.ciudad && g.ciudad!==f.ciudad) return false;
     if(f.metodoPago && (g.metodoPago||'Tarjeta')!==f.metodoPago) return false;
-    if(f.desde && (g.fecha||'') < f.desde) return false;
-    if(f.hasta && (g.fecha||'') > f.hasta) return false;
     if(f.texto){
       var t = f.texto.toLowerCase();
       var hay = (g.beneficiario||'').toLowerCase().indexOf(t)>=0 || (g.detalle||'').toLowerCase().indexOf(t)>=0;
@@ -1483,16 +1481,13 @@ function renderGastos(app){
         '<select id="fFiltroConcepto"><option value="">Concepto: todos</option>'+CONCEPTOS_GASTO.map(function(c){return '<option '+(f.concepto===c?'selected':'')+'>'+c+'</option>';}).join('')+'</select>'+
         '<select id="fFiltroCiudad"><option value="">Ciudad: todas</option></select>'+
       '</div>'+
-      '<select id="fFiltroMetodoPago">'+
-        '<option value="">Pago: todos</option>'+
-        '<option value="Tarjeta" '+(f.metodoPago==='Tarjeta'?'selected':'')+'>💳 Solo Tarjeta</option>'+
-        '<option value="Efectivo" '+(f.metodoPago==='Efectivo'?'selected':'')+'>💵 Solo Efectivo</option>'+
-      '</select>'+
-      '<p class="muted" style="font-size:11px;margin:2px 0 8px">Filtra por Tarjeta o Efectivo antes de exportar para tener los dos reportes por separado.</p>'+
-      '<div class="grid2">'+
-        '<div><label class="small">Desde</label><input type="date" id="fFiltroDesde" value="'+escapeHtml(f.desde)+'"></div>'+
-        '<div><label class="small">Hasta</label><input type="date" id="fFiltroHasta" value="'+escapeHtml(f.hasta)+'"></div>'+
+      '<label class="small">Pago</label>'+
+      '<div class="track">'+
+        '<button type="button" class="'+(f.metodoPago===''?'sel':'')+'" data-filtropago="">Todos</button>'+
+        '<button type="button" class="'+(f.metodoPago==='Tarjeta'?'sel':'')+'" data-filtropago="Tarjeta">💳 Tarjeta</button>'+
+        '<button type="button" class="'+(f.metodoPago==='Efectivo'?'sel':'')+'" data-filtropago="Efectivo">💵 Efectivo</button>'+
       '</div>'+
+      '<p class="muted" style="font-size:11px;margin:2px 0 8px">Filtra por Tarjeta o Efectivo antes de exportar para tener los dos reportes por separado.</p>'+
       '<label class="small">Buscar (beneficiario / detalle)</label><input id="fFiltroTexto" value="'+escapeHtml(f.texto)+'" placeholder="Ej: Hilton, Uber...">'+
       '<button class="ghost" id="btnLimpiarFiltroGastos" style="font-size:12px">Limpiar filtros</button>'+
     '</div>'+
@@ -1610,15 +1605,18 @@ function wireGastos(){
     return;
   }
   on('btnNuevoGasto', function(){ STATE.gastoForm = nuevoGasto(); render(); });
-  on('btnLimpiarFiltroGastos', function(){ STATE.gastoFiltro = {concepto:'',ciudad:'',metodoPago:'',desde:'',hasta:'',texto:''}; render(); });
-  ['fFiltroConcepto','fFiltroCiudad','fFiltroMetodoPago','fFiltroDesde','fFiltroHasta'].forEach(function(id){
+  on('btnLimpiarFiltroGastos', function(){ STATE.gastoFiltro = {concepto:'',ciudad:'',metodoPago:'',texto:''}; render(); });
+  ['fFiltroConcepto','fFiltroCiudad'].forEach(function(id){
     var el = document.getElementById(id);
     if(el) el.onchange = function(){
       STATE.gastoFiltro.concepto = val('fFiltroConcepto');
       STATE.gastoFiltro.ciudad = val('fFiltroCiudad');
-      STATE.gastoFiltro.metodoPago = val('fFiltroMetodoPago');
-      STATE.gastoFiltro.desde = val('fFiltroDesde');
-      STATE.gastoFiltro.hasta = val('fFiltroHasta');
+      render();
+    };
+  });
+  document.querySelectorAll('[data-filtropago]').forEach(function(btn){
+    btn.onclick = function(){
+      STATE.gastoFiltro.metodoPago = btn.getAttribute('data-filtropago');
       render();
     };
   });
