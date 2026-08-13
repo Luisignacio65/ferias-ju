@@ -18,7 +18,14 @@ body.noche{
   --line:#2a3948; --bg:#0f1720; --card:#182430; --amber:#d79a3f; --red:#e0655a;
 }
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
-html,body{margin:0;padding:0;height:100%}
+html,body{margin:0;padding:0;min-height:100%}
+/* FIX bug viejo "la barra inferior tapa lo último del scroll": con
+   box-sizing:border-box + height:100% (fijo) en body, el padding-bottom que
+   reserva espacio para la navbar quedaba "adentro" de esos 100vh en vez de
+   sumarse aparte — en pestañas con contenido más largo que la pantalla, el
+   final real del scroll no dejaba el hueco de 200px prometido y la navbar
+   fija tapaba las últimas líneas. Con min-height en vez de height, el body
+   crece con el contenido y el padding-bottom sí queda al final de verdad. */
 body{
   background:var(--bg); color:var(--graf);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -2381,7 +2388,7 @@ function renderDossier(app){
         return '<h4 style="margin-top:12px">'+f+'</h4>'+filas;
       }).join('') : '<p class="muted" style="font-size:12.5px">Sin actividades de itinerario todavía.</p>';
 
-      var resumenBox = (STATE.dossierResumenViaje===viaje)? ('<div class="card" style="background:var(--bg)"><h4>Resumen para compartir</h4><textarea id="taResumen_'+escapeHtml(viaje)+'" style="min-height:160px">'+escapeHtml(STATE.dossierResumenTexto)+'</textarea><button class="teal" data-copyresumen="'+escapeHtml(viaje)+'" style="width:100%">📋 Copiar</button></div>') : '';
+      var resumenBox = (STATE.dossierResumenViaje===viaje)? ('<div class="card" style="background:var(--bg)"><h4>Resumen para compartir</h4><textarea id="taResumen_'+escapeHtml(viaje)+'" style="min-height:160px">'+escapeHtml(STATE.dossierResumenTexto)+'</textarea><div class="grid2"><button class="teal" data-copyresumen="'+escapeHtml(viaje)+'">📋 Copiar</button><button class="ghost" data-cerrarresumen="'+escapeHtml(viaje)+'">✕ Cerrar</button></div></div>') : '';
 
       return '<div class="card"><h3>🌍 '+escapeHtml(viaje)+'</h3>'+
         '<h4>Itinerario</h4>'+itinHtml+
@@ -3048,6 +3055,12 @@ document.getElementById('app').addEventListener('click', function(ev){
     var taR = document.getElementById('taResumen_'+viajeCopy);
     var texto = taR? taR.value : STATE.dossierResumenTexto;
     copiarTextoPlano(texto, function(){ toast('Resumen copiado ✓'); });
+    return;
+  }
+  var itCerrarRes = ev.target.closest('[data-cerrarresumen]');
+  if(itCerrarRes){
+    invalidarResumenDossier();
+    render();
     return;
   }
 });
