@@ -53,6 +53,11 @@ textarea{min-height:56px; resize:vertical}
 /* Objetivos por línea: el cuadro crece con el contenido (ver JS) — sin
    scroll interno ni asa de resize manual, que compitan con eso. */
 textarea.objetivo-auto{overflow:hidden; resize:none; min-height:90px}
+/* Resumen para compartir (Dossier): mismo truco de altura automática que
+   Objetivos — crece hasta mostrar todo el texto, sin scroll interno ni asa
+   de resize, y con letra más grande para que sea cómodo de leer de un
+   vistazo antes de copiar/compartir. */
+textarea.resumen-auto{overflow:hidden; resize:none; min-height:200px; font-size:15.5px; line-height:1.65}
 label.small{font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.03em}
 .wrap{max-width:640px; margin:0 auto; padding:14px 14px 24px}
 header.top{
@@ -337,6 +342,14 @@ function customConfirm(msg, onYes){
   cancelBtn.onclick = function(){ cerrar(); };
 }
 function escapeHtml(s){ return (s||"").replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+
+/* Crece un textarea hasta la altura de todo su contenido, sin scroll interno
+   — mismo truco usado en Objetivos, reutilizable en cualquier textarea que
+   necesite mostrarse completo de una vez (ej. Resumen para compartir). */
+function autoAjustarAltura(ta){
+  ta.style.height = 'auto';
+  ta.style.height = (ta.scrollHeight+2) + 'px';
+}
 
 /* ---------- Núcleo: capa de datos (IndexedDB con respaldo en memoria) ---------- */
 var DB=null, DB_OK=false, MEM={ encuentros:[], visitas:[], gastos:[], planeacion:[], dossier:[] };
@@ -2388,7 +2401,7 @@ function renderDossier(app){
         return '<h4 style="margin-top:12px">'+f+'</h4>'+filas;
       }).join('') : '<p class="muted" style="font-size:12.5px">Sin actividades de itinerario todavía.</p>';
 
-      var resumenBox = (STATE.dossierResumenViaje===viaje)? ('<div class="card" style="background:var(--bg)"><h4>Resumen para compartir</h4><textarea id="taResumen_'+escapeHtml(viaje)+'" style="min-height:160px">'+escapeHtml(STATE.dossierResumenTexto)+'</textarea><div class="grid2"><button class="teal" data-copyresumen="'+escapeHtml(viaje)+'">📋 Copiar</button><button class="ghost" data-cerrarresumen="'+escapeHtml(viaje)+'">✕ Cerrar</button></div></div>') : '';
+      var resumenBox = (STATE.dossierResumenViaje===viaje)? ('<div class="card" style="background:var(--bg)"><h4>Resumen para compartir</h4><textarea class="resumen-auto" id="taResumen_'+escapeHtml(viaje)+'">'+escapeHtml(STATE.dossierResumenTexto)+'</textarea><div class="grid2"><button class="teal" data-copyresumen="'+escapeHtml(viaje)+'">📋 Copiar</button><button class="ghost" data-cerrarresumen="'+escapeHtml(viaje)+'">✕ Cerrar</button></div></div>') : '';
 
       return '<div class="card"><h3>🌍 '+escapeHtml(viaje)+'</h3>'+
         '<h4>Itinerario</h4>'+itinHtml+
@@ -2423,6 +2436,12 @@ function renderDossier(app){
 
     body.innerHTML = '<h3 style="margin-top:4px">Itinerario por viaje</h3>'+itinerarioHtml+
       '<h3 style="margin-top:22px">Reservas por categoría</h3>'+reservasHtml;
+
+    var taResumenActivo = body.querySelector('.resumen-auto');
+    if(taResumenActivo){
+      autoAjustarAltura(taResumenActivo);
+      taResumenActivo.addEventListener('input', function(){ autoAjustarAltura(taResumenActivo); });
+    }
   });
 }
 function CATEGORIA_ICONO(cat){
