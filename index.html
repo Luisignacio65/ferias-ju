@@ -524,6 +524,27 @@ function leerComprobanteGasto(dataUrl, onDone){
   });
 }
 
+/* ---------- OCR de listados de referencias (foto de una hoja con varias telas
+   seleccionadas) — Módulo Encuentro, "Listado Selección Stand". Reutiliza el
+   mismo motor offline de Gastos (ya empacado en el sitio) en vez de cargar un
+   segundo motor. No intenta adivinar campos — solo separa líneas y las numera,
+   Luis corrige a mano lo que el OCR no haya leído bien. */
+function organizarListadoTexto(raw){
+  var lineas = (raw||'').split(/\r?\n/).map(function(l){return l.trim();}).filter(function(l){return l.length>1;});
+  if(!lineas.length) return '';
+  return lineas.map(function(l,i){ return (i+1)+'. '+l; }).join('\n');
+}
+function leerListadoReferencias(dataUrl, onDone){
+  obtenerWorkerGastos(function(worker){
+    if(!worker){ onDone(null); return; }
+    worker.recognize(dataUrl).then(function(r){
+      var texto = (r && r.data && r.data.text) || '';
+      var organizado = organizarListadoTexto(texto);
+      onDone(organizado || null);
+    }).catch(function(){ onDone(null); });
+  });
+}
+
 var CIUDADES_CONOCIDAS_GASTO = [
   {nombre:'Medellín', re:/medell[íi]n/i},
   {nombre:'Bogotá', re:/bogot[áa]/i},
@@ -793,6 +814,7 @@ function nuevoEncuentro(){
       desarrollos:{aplica:false, resumen:'', resultado:'', comentario:''}
     },
     telas:[], fotos_contexto:[], hallazgos_stand:'', novedades_proveedor:'', pedido_nuevo:'', otros_pendientes:'',
+    listado_refs_texto:'',
     fecha_creacion:Date.now(), fecha_edicion:Date.now(), historial:[]
   };
 }
@@ -1012,10 +1034,6 @@ function stepA3(e){
           '<option value="Solicitado / no entregado" '+(tl.mostrario==='Solicitado / no entregado'?'selected':'')+'>Solicitado / no entregado</option>'+
         '</select>'+
       '</div>'+
-      '<div class="audio-row">'+
-        (tl.audio? '<audio controls src="'+tl.audio+'" style="height:32px;flex:1"></audio>' : '<span class="muted">Sin nota de voz</span>')+
-        '<button class="sec" data-recaudio="'+i+'" style="font-size:12px;padding:8px 10px">🎙️</button>'+
-      '</div>'+
       '<div class="grid2">'+
         '<button class="'+(tl.importante?'teal':'sec')+'" data-imp="'+i+'" style="font-size:12.5px">'+(tl.importante?'★ Importante':'☆ Marcar importante')+'</button>'+
         '<button class="ghost" data-ocr="'+i+'" style="font-size:12.5px">🔎 Intentar OCR</button>'+
@@ -1038,11 +1056,17 @@ function stepA3(e){
    stand (automática), temas tratados (opcionales, ya no bloquean el avance),
    notas/pendientes libres, y el registro OEA si el proveedor es nuevo. */
 function stepCierre(e){
-  var seleccion = e.telas.filter(function(t){return t.importante;});
+  if(e.listado_refs_texto===undefined) e.listado_refs_texto = ''; // compatibilidad con encuentros guardados antes de este campo
   var seleccionHtml = ''+
   '<div class="card">'+
     '<h3>Listado Selección Stand</h3>'+
-    (seleccion.length? seleccion.map(function(t){return '<p>★ '+escapeHtml(t.ref||'(sin referencia)')+' — '+escapeHtml(t.composicion||'')+'</p>';}).join('') : '<p class="muted">Ninguna tela marcada como importante todavía — vuelve al paso anterior y toca ☆ en las que quieras destacar.</p>')+
+    (e.telas.length? e.telas.map(function(t){return '<p>'+(t.importante?'★ ':'· ')+escapeHtml(t.ref||'(sin referencia)')+' — '+escapeHtml(t.composicion||'')+'</p>';}).join('') : '<p class="muted">Aún no has capturado telas en el paso anterior.</p>')+
+    (e.telas.length? '<p class="muted" style="font-size:11px;margin-top:4px">★ = marcada como importante en el paso anterior</p>' : '')+
+    '<hr style="border:none;border-top:1px solid var(--line);margin:14px 0">'+
+    '<label class="small">O foto de un listado de referencias (si el proveedor te lo entrega escrito o impreso)</label>'+
+    '<input type="file" accept="image/*" capture="environment" id="fotoListadoRefs">'+
+    '<label class="small" style="margin-top:8px">Transcripción del listado — revisa y corrige lo que el OCR no haya leído bien</label>'+
+    '<textarea id="fListadoRefs" placeholder="Aquí aparece lo leído de la foto — también puedes escribir aquí a mano.">'+escapeHtml(e.listado_refs_texto)+'</textarea>'+
   '</div>';
   var oeaHtml = '';
   if(e.proveedor_nuevo){
@@ -1090,7 +1114,14 @@ function stepB1(v){
   return ''+
   '<div class="card">'+
     '<label class="small">Marca / almacén</label><input id="fMarca" value="'+escapeHtml(v.marca)+'" placeholder="Ej: Zara, almacén local...">'+
-    '<label class="small">Ubicación</label><input id="fUbicacion" value="'+escapeHtml(v.ubicacion)+'" placeholder="Ciudad / zona">'+
+    '<label class="small">Ubicación</label>'+
+    '<div class="track">'+
+      ['Shanghái','París','Londres'].map(function(c){
+        return '<button type="button" class="'+(v.ubicacion===c?'sel':'')+'" data-ciudadrapidamercado="'+c+'">'+c+'</button>';
+      }).join('')+
+      '<button type="button" data-ciudadrapidamercado="__otra__">Otras</button>'+
+    '</div>'+
+    '<input id="fUbicacion" value="'+escapeHtml(v.ubicacion)+'" placeholder="Ciudad / zona">'+
   '</div>'+
   '<div class="card">'+viewFotosContexto(v.fotos_contexto, 'fotoCtxVis', 'Ej: Fachada, Interior, Sección Denim, Prenda...', 'Fotos del almacén (fachada, interior, secciones, prendas)')+'</div>';
 }
@@ -1387,6 +1418,12 @@ function viewGastoForm(g){
     (g._ocrTexto? '<button type="button" class="ghost" id="btnVerOcr" style="font-size:11.5px;margin-top:6px">🔎 Ver texto leído de la foto</button>'+
       '<pre id="ocrTextoBox" class="hidden" style="white-space:pre-wrap;font-size:11px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:6px;max-height:160px;overflow:auto">'+escapeHtml(g._ocrTexto)+'</pre>' : '')+
     '<label class="small">Ciudad</label>'+
+    '<div class="track">'+
+      ['Shanghái','Guangzhou','París','Londres','Medellín'].map(function(c){
+        return '<button type="button" class="'+(g.ciudad===c?'sel':'')+'" data-ciudadrapida="'+c+'">'+c+'</button>';
+      }).join('')+
+      '<button type="button" data-ciudadrapida="__otra__">Otras</button>'+
+    '</div>'+
     '<input id="fCiudad" list="listaCiudades" value="'+escapeHtml(g.ciudad)+'" placeholder="Ej: Medellín, París, Shanghái...">'+
     '<datalist id="listaCiudades"><option value="Medellín"><option value="Bogotá"><option value="Cali"><option value="París"><option value="Shanghái"></datalist>'+
     '<label class="small">Fecha del gasto</label>'+
@@ -1520,6 +1557,15 @@ function wireGastos(){
       btn.onclick = function(){
         sincronizarGastoFormDesdeDOM(g);
         g.metodoPago = btn.getAttribute('data-metodopago');
+        render();
+      };
+    });
+    document.querySelectorAll('[data-ciudadrapida]').forEach(function(btn){
+      btn.onclick = function(){
+        var c = btn.getAttribute('data-ciudadrapida');
+        if(c==='__otra__'){ var inp=document.getElementById('fCiudad'); if(inp) inp.focus(); return; }
+        sincronizarGastoFormDesdeDOM(g);
+        g.ciudad = c;
         render();
       };
     });
@@ -2292,7 +2338,7 @@ function renderDossier(app){
   if(STATE.dossierItinForm){ app.innerHTML = viewItinerarioForm(STATE.dossierItinForm); return; }
   app.innerHTML = ''+
     '<h2>Dossier de Viaje & Logística</h2>'+
-    '<p class="muted">Itinerario y reservas de todos tus viajes — accesible sin señal, para dejar de ser "el mostrador de información" del grupo.</p>'+
+    '<p class="muted">Reservas organizadas por categoría (vuelos, hoteles, trenes, restaurantes, escarapelas...), en orden cronológico — accesible sin señal, para dejar de ser "el mostrador de información" del grupo.</p>'+
     '<datalist id="listaViajesDossier"></datalist>'+
     '<div class="grid2">'+
       '<button class="teal" id="btnNuevaReserva">📄 + Nueva reserva</button>'+
@@ -2309,9 +2355,13 @@ function renderDossier(app){
     if(!all.length){ body.innerHTML = '<div class="card"><p class="muted">Sin viajes organizados todavía — crea tu primera reserva o actividad de itinerario.</p></div>'; return; }
 
     var viajes = dossierViajesDistintos(all);
-    body.innerHTML = viajes.map(function(viaje){
+
+    /* Itinerario: se conserva agrupado por viaje y por fecha — es información de
+       agenda día a día, distinta del problema que reportaste (reservas sueltas
+       difíciles de encontrar). Cada viaje trae también su botón de resumen. */
+    var itinerarioHtml = viajes.map(function(viaje){
       var itins = all.filter(function(x){ return x.tipo==='itinerario' && x.viaje===viaje; });
-      var reservas = all.filter(function(x){ return x.tipo==='reserva' && x.viaje===viaje; });
+      var reservasDelViaje = all.filter(function(x){ return x.tipo==='reserva' && x.viaje===viaje; });
       var porFecha = {};
       itins.forEach(function(it){ var f=it.fecha||'Sin fecha'; (porFecha[f]=porFecha[f]||[]).push(it); });
       var itinHtml = Object.keys(porFecha).length? Object.keys(porFecha).sort().map(function(f){
@@ -2331,9 +2381,28 @@ function renderDossier(app){
         return '<h4 style="margin-top:12px">'+f+'</h4>'+filas;
       }).join('') : '<p class="muted" style="font-size:12.5px">Sin actividades de itinerario todavía.</p>';
 
-      var resHtml = reservas.length? reservas.slice().sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||'') || (a.hora||'').localeCompare(b.hora||''); }).map(function(r){
+      var resumenBox = (STATE.dossierResumenViaje===viaje)? ('<div class="card" style="background:var(--bg)"><h4>Resumen para compartir</h4><textarea id="taResumen_'+escapeHtml(viaje)+'" style="min-height:160px">'+escapeHtml(STATE.dossierResumenTexto)+'</textarea><button class="teal" data-copyresumen="'+escapeHtml(viaje)+'" style="width:100%">📋 Copiar</button></div>') : '';
+
+      return '<div class="card"><h3>🌍 '+escapeHtml(viaje)+'</h3>'+
+        '<h4>Itinerario</h4>'+itinHtml+
+        '<button class="ghost" data-genresumen="'+escapeHtml(viaje)+'" style="font-size:12px;width:100%;margin-top:10px">📋 Generar resumen para compartir (itinerario + reservas de este viaje)</button>'+
+        resumenBox+
+      '</div>';
+    }).join('');
+
+    /* Reservas: AHORA agrupadas por categoría (Vuelo, Hotel, Tren, Pase/Entrada,
+       Restaurante...), sin importar el viaje, y en orden cronológico dentro de
+       cada categoría — así encuentras "la reserva del restaurante en París" en
+       la sección Restaurante, sin importar dónde quedó guardada. El viaje se
+       muestra como etiqueta (funciona también como referencia de ciudad). */
+    var todasReservas = all.filter(function(x){ return x.tipo==='reserva'; });
+    var reservasHtml = CATEGORIAS_RESERVA.map(function(cat){
+      var items = todasReservas.filter(function(r){ return r.categoria===cat; });
+      if(!items.length) return '';
+      items = items.slice().sort(function(a,b){ return (a.fecha||'9999').localeCompare(b.fecha||'9999') || (a.hora||'').localeCompare(b.hora||''); });
+      var filas = items.map(function(r){
         return '<div class="reg-item">'+
-          '<div class="top"><strong>'+escapeHtml(r.titulo||'(sin título)')+'</strong><span class="pill pendiente">'+escapeHtml(r.categoria)+'</span></div>'+
+          '<div class="top"><strong>'+escapeHtml(r.titulo||'(sin título)')+'</strong>'+(r.viaje? '<span class="pill pendiente">'+escapeHtml(r.viaje)+'</span>' : '')+'</div>'+
           '<p class="muted" style="font-size:12px">'+(r.fecha||'—')+' '+(r.hora||'')+(r.lugar? ' · '+escapeHtml(r.lugar) : '')+(r.confirmacion? ' · Conf: '+escapeHtml(r.confirmacion) : '')+'</p>'+
           (r.documento? '<p style="font-size:12px"><a href="'+r.documento+'" target="_blank" rel="noopener">📎 Ver documento</a></p>' : '')+
           '<div class="grid2">'+
@@ -2341,18 +2410,17 @@ function renderDossier(app){
             '<button class="ghost danger" data-delres="'+r.id+'" style="font-size:12px">🗑️ Eliminar</button>'+
           '</div>'+
         '</div>';
-      }).join('') : '<p class="muted" style="font-size:12.5px">Sin reservas todavía.</p>';
+      }).join('');
+      return '<div class="card"><h3>'+CATEGORIA_ICONO(cat)+' '+escapeHtml(cat)+'</h3>'+filas+'</div>';
+    }).join('') || '<div class="card"><p class="muted">Sin reservas todavía.</p></div>';
 
-      var resumenBox = (STATE.dossierResumenViaje===viaje)? ('<div class="card" style="background:var(--bg)"><h4>Resumen para compartir</h4><textarea id="taResumen_'+escapeHtml(viaje)+'" style="min-height:160px">'+escapeHtml(STATE.dossierResumenTexto)+'</textarea><button class="teal" data-copyresumen="'+escapeHtml(viaje)+'" style="width:100%">📋 Copiar</button></div>') : '';
-
-      return '<div class="card"><h3>🌍 '+escapeHtml(viaje)+'</h3>'+
-        '<h4>Itinerario</h4>'+itinHtml+
-        '<h4 style="margin-top:16px">Reservas y documentos</h4>'+resHtml+
-        '<button class="ghost" data-genresumen="'+escapeHtml(viaje)+'" style="font-size:12px;width:100%;margin-top:10px">📋 Generar resumen para compartir</button>'+
-        resumenBox+
-      '</div>';
-    }).join('');
+    body.innerHTML = '<h3 style="margin-top:4px">Itinerario por viaje</h3>'+itinerarioHtml+
+      '<h3 style="margin-top:22px">Reservas por categoría</h3>'+reservasHtml;
   });
+}
+function CATEGORIA_ICONO(cat){
+  var m = {'Vuelo':'✈️','Hotel':'🏨','Tren':'🚆','Pase/Entrada':'🎫','Transporte local':'🚗','Restaurante':'🍽️','Espectáculo':'🎭','Otro':'📌'};
+  return m[cat] || '📌';
 }
 /* El resumen para compartir es una FOTO de un momento (como PENDIENTES_COMISION):
    si algo cambia después de generarlo, se invalida para que Luis no comparta
@@ -2497,13 +2565,6 @@ function wireEncuentro(){
     document.querySelectorAll('[data-delTela]').forEach(function(b){
       b.onclick=function(){ var i=+b.getAttribute('data-delTela'); e.telas.splice(i,1); render(); };
     });
-    document.querySelectorAll('[data-recaudio]').forEach(function(b){
-      b.onclick=function(){
-        var i=+b.getAttribute('data-recaudio');
-        if(b.textContent.indexOf('⏹')>=0){ stopRec(); b.innerHTML='🎙️'; }
-        else{ b.innerHTML='<span class="rec-dot"></span>⏹'; startRec(function(dataUrl){ e.telas[i].audio=dataUrl; render(); }); }
-      };
-    });
     document.querySelectorAll('[data-ocr]').forEach(function(b){
       b.onclick=function(){
         var i=+b.getAttribute('data-ocr');
@@ -2544,6 +2605,25 @@ function wireEncuentro(){
     if(taH) taH.oninput = function(){ e.hallazgos_stand = taH.value; };
     var taO = document.getElementById('fOtros');
     if(taO) taO.oninput = function(){ e.otros_pendientes = taO.value; };
+    var taListado = document.getElementById('fListadoRefs');
+    if(taListado) taListado.oninput = function(){ e.listado_refs_texto = taListado.value; };
+    var fListaFoto = document.getElementById('fotoListadoRefs');
+    if(fListaFoto) fListaFoto.onchange = function(){
+      if(!fListaFoto.files || !fListaFoto.files[0]) return;
+      e.hallazgos_stand = val('fHallazgos'); e.otros_pendientes = val('fOtros'); // preserva lo ya escrito antes de repintar
+      compressImage(fListaFoto.files[0], function(dataUrl){
+        toast('Leyendo listado…', 8000);
+        leerListadoReferencias(dataUrl, function(textoOrganizado){
+          if(textoOrganizado){
+            e.listado_refs_texto = (e.listado_refs_texto? e.listado_refs_texto+'\n\n' : '') + textoOrganizado;
+            toast('Listado leído — revisa y corrige ✓');
+          } else {
+            toast('No se pudo leer automáticamente — escribe el listado a mano.');
+          }
+          render();
+        });
+      });
+    };
     var cbQr = document.getElementById('fQr2');
     if(cbQr) cbQr.onchange = function(){ e.onboarding.qr_mostrado = cbQr.checked; };
     var cbCo = document.getElementById('fCourier2');
@@ -2567,6 +2647,15 @@ function wireAlmacen(){
   var v = STATE.vis;
   if(STATE.visStep===0){
     wireFotosContexto(v.fotos_contexto, 'fotoCtxVis', render);
+    document.querySelectorAll('[data-ciudadrapidamercado]').forEach(function(btn){
+      btn.onclick = function(){
+        var c = btn.getAttribute('data-ciudadrapidamercado');
+        if(c==='__otra__'){ var inp=document.getElementById('fUbicacion'); if(inp) inp.focus(); return; }
+        v.marca = val('fMarca'); // preserva lo ya escrito en Marca antes de repintar
+        v.ubicacion = c;
+        render();
+      };
+    });
     on('bSig', function(){
       v.marca=val('fMarca'); v.ubicacion=val('fUbicacion');
       if(!v.marca){ toast("Escribe la marca o almacén."); return; }
