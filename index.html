@@ -240,6 +240,7 @@ body.unlocked #lockScreen{ display:none !important; }
   <button data-view="seguimiento"><span class="ic">🗂️</span>Seguim.</button>
   <button data-view="muestras"><span class="ic">📦</span>Muestras</button>
   <button data-view="gastos"><span class="ic">💳</span>Gastos</button>
+  <button data-view="negociacion"><span class="ic">💹</span>Negoc.</button>
   <button data-view="reporte"><span class="ic">📊</span>Reporte</button>
 </div>
 
@@ -352,11 +353,11 @@ function autoAjustarAltura(ta){
 }
 
 /* ---------- Núcleo: capa de datos (IndexedDB con respaldo en memoria) ---------- */
-var DB=null, DB_OK=false, MEM={ encuentros:[], visitas:[], gastos:[], planeacion:[], dossier:[] };
+var DB=null, DB_OK=false, MEM={ encuentros:[], visitas:[], gastos:[], planeacion:[], dossier:[], negociacion:[] };
 
 function openDB(cb){
   if(!('indexedDB' in window)){ toast("Este navegador no tiene almacenamiento local — se usará memoria temporal (exporta seguido)."); cb(); return; }
-  var req = indexedDB.open("FeriasDB_v1", 4);
+  var req = indexedDB.open("FeriasDB_v1", 5);
   req.onupgradeneeded = function(e){
     var db = e.target.result;
     if(!db.objectStoreNames.contains('encuentros')) db.createObjectStore('encuentros',{keyPath:'id'});
@@ -364,6 +365,7 @@ function openDB(cb){
     if(!db.objectStoreNames.contains('gastos')) db.createObjectStore('gastos',{keyPath:'id'});
     if(!db.objectStoreNames.contains('planeacion')) db.createObjectStore('planeacion',{keyPath:'id'});
     if(!db.objectStoreNames.contains('dossier')) db.createObjectStore('dossier',{keyPath:'id'});
+    if(!db.objectStoreNames.contains('negociacion')) db.createObjectStore('negociacion',{keyPath:'id'});
   };
   req.onsuccess = function(e){ DB=e.target.result; DB_OK=true; cb(); };
   req.onerror = function(){ toast("No se pudo abrir el almacenamiento local — usando memoria temporal."); cb(); };
@@ -821,7 +823,10 @@ var STATE = {
   dossierForm: null, // reserva en construcción/edición (Módulo 2 — Dossier de Viaje)
   dossierItinForm: null, // actividad de itinerario en construcción/edición (Módulo 2)
   dossierUltimoViaje: '', // último viaje usado, para prellenar el siguiente registro
-  dossierResumenViaje: '', dossierResumenTexto: '' // resumen generado para compartir (Módulo 2)
+  dossierResumenViaje: '', dossierResumenTexto: '', // resumen generado para compartir (Módulo 2)
+  negForm: null, // referencia de negociación en construcción/edición (Módulo 8 — Negociación)
+  negFiltro: {pais:'', linea:'', proveedor:'', ref:''},
+  _negAll: [] // caché de la última lectura de IndexedDB, para filtrar sin re-consultar
 };
 
 function nuevoEncuentro(){
@@ -936,6 +941,7 @@ function render(){
   else if(STATE.view==='seguimiento') renderSeguimiento(app);
   else if(STATE.view==='muestras') renderMuestras(app);
   else if(STATE.view==='gastos') renderGastos(app);
+  else if(STATE.view==='negociacion') renderNegociacion(app);
   else if(STATE.view==='reporte') renderReporte(app);
   wireView();
   autoguardarBorrador();
@@ -2523,6 +2529,7 @@ function wireView(){
   else if(STATE.view==='seguimiento') wireSeguimiento();
   else if(STATE.view==='muestras') wireMuestras();
   else if(STATE.view==='gastos') wireGastos();
+  else if(STATE.view==='negociacion') wireNegociacion();
   else if(STATE.view==='reporte') wireReporte();
 }
 function on(id, fn){ var el=document.getElementById(id); if(el) el.onclick=fn; }
@@ -2871,6 +2878,278 @@ function exportarPDF(){
   });
 }
 
+/* ---------- Negociación (Módulo 8 — Sourcing Intelligence Platform, Ronda Q1-2027) ----------
+   Store IndexedDB nuevo `negociacion`, con el mismo esquema de campos que
+   Presentacion_Accionista_Ronda1_Q1-2027.html para poder cruzar datos entre
+   los dos: target/contraoferta1 (Oferta 1) = Ronda 1; accionista_val (Target 2)
+   /oferta2_val (Oferta 2) = Ronda 2; target3_val (Target 3) = Ronda 3 en curso.
+   Gap = regla confirmada por Luis el 2026-08-14: % entre la última oferta del
+   proveedor (Oferta 2 si existe, si no Oferta 1) y el último target nuestro
+   (Target 3 si existe, si no Target 2, si no el Target original). Se recalcula
+   en cada render, no queda guardado — así siempre refleja lo último editado. */
+var LINEAS_NEG = ['DENIM','MODA LIVIANA','MODA PESADA','INSTITUCIONAL','PUNTO'];
+var SEED_NEGOCIACION_R1 = [{"proveedor": "DAYATEX", "pais": "CHINA", "categoria": "BPTS LIVIANOS", "referencia": "CELINE", "codigo": "DRY-13007", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2025 Q2", "p1": "0.69", "p2_label": "2025 Q3", "p2": "0.82", "p3_label": "2025 Q4", "p3": "0.82", "target": "0.70", "contraoferta1": "$0.74", "accionista_val": "0.72", "linea": "MODA LIVIANA"}, {"proveedor": "FEIFANLAN", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "FOSIL (FEMENINO)", "codigo": "DS929-A", "cantidad_fmt": "90", "cantidad_val": 90, "p1_label": "2025 Q2", "p1": "2.10", "p2_label": "2025 Q3", "p2": "2.10", "p3_label": "2025 Q4", "p3": "2.10", "target": "2", "contraoferta1": "$2.10", "accionista_val": "2.00", "linea": "DENIM"}, {"proveedor": "FEIFANLAN", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "TURI (FEMENINO)", "cantidad_fmt": "60", "cantidad_val": 60, "p1_label": "2025 Q2", "p1": "2.10", "p2_label": "2025 Q3", "p2": "2.10", "p3_label": "2025 Q4", "p3": "2.10", "target": "2", "contraoferta1": "$2.10", "accionista_val": "2.00", "linea": "DENIM"}, {"proveedor": "KAILAN", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "26KL-3101C", "codigo": "26KL-3101C", "cantidad_fmt": "60", "cantidad_val": 60, "target": "2.1", "contraoferta1": "$2.28", "accionista_val": "2.10", "pendiente": false, "linea": "SIN LÍNEA (revisar)"}, {"proveedor": "KAILAN", "pais": "CHINA", "categoria": "SATINES", "referencia": "AMARETTO", "codigo": "KL-731-1", "cantidad_fmt": "240", "cantidad_val": 240, "p3_label": "2025 Q2", "p3": "1.88", "target": "1.80", "contraoferta1": "$1.84", "accionista_val": "1.80", "linea": "DENIM"}, {"proveedor": "KAILAN", "pais": "CHINA", "categoria": "RÍGIDOS MEZCLA", "referencia": "CALAHONDA", "codigo": "KL-2531A", "cantidad_fmt": "240", "cantidad_val": 240, "p1_label": "2025 Q2", "p1": "1.66", "p2_label": "2025 Q3", "p2": "1.66", "p3_label": "2025 Q4", "p3": "1.66", "target": "1.60", "contraoferta1": "$1.64", "accionista_val": "1.60", "linea": "DENIM"}, {"proveedor": "KAILAN", "pais": "CHINA", "categoria": "SATINES", "referencia": "MARTINI", "codigo": "19KL-1851A", "cantidad_fmt": "180", "cantidad_val": 180, "p1_label": "2025 Q2", "p1": "1.93", "p2_label": "2025 Q3", "p2": "1.89", "p3_label": "2025 Q4", "p3": "1.89", "target": "1.80", "contraoferta1": "$1.89", "accionista_val": "1.80", "linea": "DENIM"}, {"proveedor": "KAILAN", "pais": "CHINA", "categoria": "SATINES", "referencia": "MARTINI BLACK", "codigo": "19KL-1851BB", "cantidad_fmt": "90", "cantidad_val": 90, "p2_label": "2025 Q1", "p2": "1.92", "p3_label": "2025 Q2", "p3": "1.95", "target": "1.85", "contraoferta1": "$1.91", "accionista_val": "1.85", "linea": "DENIM"}, {"proveedor": "LISTEN", "pais": "CHINA", "categoria": "PANTALONERÍA STRETCH", "referencia": "LOMBARDIA", "codigo": "2-206", "cantidad_fmt": "180", "cantidad_val": 180, "p3_label": "2025 Q2", "p3": "2.17", "target": "2.15", "contraoferta1": "$2.15", "accionista_val": "2.10", "linea": "MODA PESADA"}, {"proveedor": "LISTEN", "pais": "CHINA", "categoria": "PANTALONERÍA STRETCH", "referencia": "SUN FLEX", "codigo": "2251", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2024 Total", "p1": "1.94", "p2_label": "2025 Q1", "p2": "1.88", "p3_label": "2025 Q2", "p3": "1.93", "target": "1.85", "contraoferta1": "$1.85", "accionista_val": "1.83", "linea": "MODA PESADA"}, {"proveedor": "LONGSHOW", "pais": "CHINA", "categoria": "HOGAR", "referencia": "SANTORINI PC T180", "codigo": "T180 PERCALE", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2025 Q2", "p1": "1.70", "p2_label": "2025 Q3", "p2": "1.77", "p3_label": "2025 Q4", "p3": "1.77", "target": "1.70", "contraoferta1": "$1.70", "accionista_val": "1.70", "linea": "INSTITUCIONAL"}, {"proveedor": "LZM", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "ALHAMBRA (MASCULINO)", "codigo": "TR52093S MASC BK", "cantidad_fmt": "240", "cantidad_val": 240, "p1_label": "2025 Q2", "p1": "2.23", "p2_label": "2025 Q3", "p2": "2.23", "p3_label": "2025 Q4", "p3": "2.29", "target": "2.15", "contraoferta1": "$2.26", "accionista_val": "2.15", "linea": "DENIM"}, {"proveedor": "LZM", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "ALHAMBRA BLUE (MASCULINO)", "codigo": "TR52093 BLUE", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2025 Q2", "p1": "2.15", "p2_label": "2025 Q3", "p2": "2.15", "p3_label": "2025 Q4", "p3": "2.21", "target": "2.10", "contraoferta1": "$2.18", "accionista_val": "2.10", "linea": "DENIM"}, {"proveedor": "LZM", "pais": "CHINA", "categoria": "ALGODÓN STRETCH", "referencia": "CAMPARI", "codigo": "Q5705DW62", "cantidad_fmt": "360", "cantidad_val": 360, "p1_label": "2025 Q2", "p1": "2.21", "p2_label": "2025 Q3", "p2": "2.21", "p3_label": "2025 Q4", "p3": "2.23", "target": "2.15", "contraoferta1": "$2.21", "accionista_val": "2.15", "linea": "DENIM"}, {"proveedor": "LZM", "pais": "CHINA", "categoria": "PANTALONERÍA RÍGIDA", "referencia": "ESTONIA", "codigo": "L7099", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2025 Q2", "p1": "2.11", "p2_label": "2025 Q3", "p2": "2.11", "p3_label": "2025 Q4", "p3": "2.19", "target": "2.05", "contraoferta1": "$2.19", "accionista_val": "2.05", "linea": "MODA PESADA"}, {"proveedor": "LZM", "pais": "CHINA", "categoria": "PANTALONERÍA STRETCH", "referencia": "ESTONIA STRETCH", "codigo": "L7105PFD", "cantidad_fmt": "90", "cantidad_val": 90, "p1_label": "2025 Q2", "p1": "2.35", "p2_label": "2025 Q3", "p2": "2.35", "p3_label": "2025 Q4", "p3": "2.35", "target": "2.30", "contraoferta1": "$2.35", "accionista_val": "2.30", "linea": "MODA PESADA"}, {"proveedor": "LZM", "pais": "CHINA", "categoria": "RÍGIDOS ALGODÓN", "referencia": "HURACAN", "codigo": "Q57031", "cantidad_fmt": "840", "cantidad_val": 840, "p1_label": "2025 Q2", "p1": "1.96", "p2_label": "2025 Q3", "p2": "1.96", "p3_label": "2025 Q4", "p3": "2.06", "target": "1.95", "contraoferta1": "$2.03", "accionista_val": "1.95", "linea": "DENIM"}, {"proveedor": "LZM", "pais": "CHINA", "categoria": "RÍGIDOS ALGODÓN", "referencia": "HURACAN BLACK", "codigo": "57031 BLACK/WHITE WEFT", "cantidad_fmt": "90", "cantidad_val": 90, "p1_label": "2025 Q2", "p1": "1.98", "p2_label": "2025 Q3", "p2": "1.98", "p3_label": "2025 Q4", "p3": "2.06", "target": "1.95", "contraoferta1": "$2.03", "accionista_val": "1.95", "linea": "DENIM"}, {"proveedor": "LZM", "pais": "CHINA", "categoria": "RÍGIDOS ALGODÓN", "referencia": "QUEBEC (13 ONZ)", "codigo": "Q5700DW-67", "cantidad_fmt": "90", "cantidad_val": 90, "p1_label": "2025 Q2", "p1": "2.10", "p2_label": "2025 Q3", "p2": "2.10", "p3_label": "2025 Q4", "p3": "2.10", "target": "2", "contraoferta1": "$2.15", "accionista_val": "2.00", "linea": "DENIM"}, {"proveedor": "POLINE", "pais": "CHINA", "categoria": "SATINES", "referencia": "CATANIA", "codigo": "CATANIA FT", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2025 Q2", "p1": "1.65", "p2_label": "2025 Q3", "p2": "1.69", "p3_label": "2025 Q4", "p3": "1.69", "target": "1.60", "contraoferta1": "$1.69", "accionista_val": "1.60", "linea": "DENIM"}, {"proveedor": "RB INDUSTRIES", "pais": "INDIA", "categoria": "RÍGIDOS ALGODÓN", "referencia": "BONANZA", "codigo": "BONANZA", "cantidad_fmt": "240", "cantidad_val": 240, "p1_label": "2025 Q2", "p1": "1.90", "p2_label": "2025 Q3", "p2": "2", "p3_label": "2025 Q4", "p3": "2", "target": "1.90", "contraoferta1": "$1.90", "accionista_val": "1.90", "linea": "DENIM"}, {"proveedor": "SANSEN", "pais": "CHINA", "categoria": "TRILOGIAS BASICAS", "referencia": "BLUES", "codigo": "KPW49444A", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2025 Q2", "p1": "1.78", "p2_label": "2025 Q3", "p2": "1.85", "p3_label": "2025 Q4", "p3": "1.85", "target": "1.75", "contraoferta1": "$1.85", "accionista_val": "1.80", "linea": "DENIM"}, {"proveedor": "SANSEN", "pais": "CHINA", "categoria": "SATINES", "referencia": "TOM COLLINS", "codigo": "KPW59420A", "cantidad_fmt": "240", "cantidad_val": 240, "p1_label": "2025 Q2", "p1": "2.35", "p2_label": "2025 Q3", "p2": "2.42", "p3_label": "2025 Q4", "p3": "2.48", "target": "2.30", "contraoferta1": "$2.48", "accionista_val": "2.40", "linea": "DENIM"}, {"proveedor": "VINOD DENIM", "pais": "INDIA", "categoria": "RÍGIDOS ALGODÓN", "referencia": "HYDRA", "codigo": "PO20101", "cantidad_fmt": "180", "cantidad_val": 180, "p2_label": "2025 Q4", "p2": "1.88", "p3_label": "Precio lista Vinod", "p3": "1.8", "target": "1.7", "contraoferta1": "$1.75", "accionista_val": "1.72", "proveedor_anterior": "SIGNET DENIM", "pendiente": false, "linea": "DENIM"}, {"proveedor": "VINOD DENIM", "pais": "INDIA", "categoria": "RÍGIDOS ALGODÓN", "referencia": "NAVONA BLACK", "codigo": "P363913", "cantidad_fmt": "60", "cantidad_val": 60, "p2_label": "2025 Q4", "p2": "2.12", "p3_label": "Precio lista Vinod", "p3": "1.85", "target": "1.75", "contraoferta1": "$1.80", "accionista_val": "1.77", "proveedor_anterior": "SIGNET DENIM", "pendiente": false, "linea": "DENIM"}, {"proveedor": "SIGNET DENIM", "pais": "INDIA", "categoria": "RÍGIDOS ALGODÓN", "referencia": "PANDORA PLUS", "codigo": "316801", "cantidad_fmt": "180", "cantidad_val": 180, "p1_label": "2025 Q2", "p1": "1.42", "p2_label": "2025 Q3", "p2": "1.50", "p3_label": "2025 Q4", "p3": "1.53", "target": "1.4", "contraoferta1": "$1.48", "accionista_val": "1.45", "pendiente": false, "linea": "DENIM"}, {"proveedor": "VINOD DENIM", "pais": "INDIA", "categoria": "PANTALONERÍA RÍGIDA", "referencia": "SERBIA", "codigo": "375601", "cantidad_fmt": "90", "cantidad_val": 90, "p2_label": "2025 Q4", "p2": "1.85", "p3_label": "Precio lista Vinod", "p3": "1.85", "target": "1.75", "contraoferta1": "$1.80", "accionista_val": "1.77", "proveedor_anterior": "SIGNET DENIM", "pendiente": false, "linea": "MODA PESADA"}, {"proveedor": "TENGMA", "pais": "CHINA", "categoria": "RÍGIDOS ALGODÓN", "referencia": "SAKE", "codigo": "TM1468", "cantidad_fmt": "60", "cantidad_val": 60, "p1_label": "2025 Q2", "p1": "2.12", "p2_label": "2025 Q3", "p2": "2.12", "p3_label": "2025 Q4", "p3": "2.12", "target": "2", "contraoferta1": "$2.12", "accionista_val": "2.05", "linea": "DENIM"}, {"proveedor": "TIANLUO", "pais": "CHINA", "categoria": "HOGAR", "referencia": "CAOBO PC", "codigo": "TC-P-133", "cantidad_fmt": "60", "cantidad_val": 60, "p1_label": "2024 Total", "p1": "1.10", "p2_label": "2025 Q1", "p2": "1.05", "p3_label": "2025 Q4", "p3": "1.10", "target": "1", "contraoferta1": "$1.00", "accionista_val": "1.00", "linea": "INSTITUCIONAL"}, {"proveedor": "TIANLUO", "pais": "CHINA", "categoria": "HOGAR", "referencia": "ELANA", "codigo": "TL-24-TRISTAR", "cantidad_fmt": "30", "cantidad_val": 30, "p3_label": "2025 Q4", "p3": "2.70", "target": "2.50", "contraoferta1": "$2.60", "accionista_val": "2.55", "unidad": "kg", "pendiente": false, "linea": "INSTITUCIONAL"}, {"proveedor": "XINLAN", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "POSITANO (MASCULINO)", "codigo": "XF22097FB", "cantidad_fmt": "240", "cantidad_val": 240, "p1_label": "2025 Q2", "p1": "2", "p2_label": "2025 Q3", "p2": "2.10", "p3_label": "2025 Q4", "p3": "2.18", "target": "2", "contraoferta1": "$2.18", "accionista_val": "2.00", "oferta2_val": "$2.10", "target3_val": "$2.05", "linea": "DENIM"}, {"proveedor": "XINLAN", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "POSITANO BLACK (MASCULINO)", "codigo": "XF722097CH", "cantidad_fmt": "90", "cantidad_val": 90, "p1_label": "2025 Q2", "p1": "2.02", "p2_label": "2025 Q3", "p2": "2.13", "p3_label": "2025 Q4", "p3": "2.21", "target": "2.02", "contraoferta1": "$2.20", "accionista_val": "2.02", "oferta2_val": "$2.12", "target3_val": "$2.08", "linea": "DENIM"}, {"proveedor": "XINLAN", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "POSITANO CROSS (MASCULINO)", "codigo": "XFD722706FB", "cantidad_fmt": "90", "cantidad_val": 90, "p1_label": "2025 Q2", "p1": "2.04", "p2_label": "2025 Q3", "p2": "2.08", "p3_label": "2025 Q4", "p3": "2.16", "target": "2.05", "contraoferta1": "$2.16", "accionista_val": "2.05", "oferta2_val": "$2.07", "target3_val": "$2.06", "linea": "DENIM"}, {"proveedor": "XINLAN", "pais": "CHINA", "categoria": "TRILOGIAS BASICAS", "referencia": "PUGLIA", "codigo": "XF23030FB", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2025 Q2", "p1": "1.97", "p2_label": "2025 Q3", "p2": "1.97", "p3_label": "2025 Q4", "p3": "1.97", "target": "1.90", "contraoferta1": "$2.16", "accionista_val": "2.00", "oferta2_val": "$2.06", "target3_val": "$2.03", "linea": "DENIM"}, {"proveedor": "XINLAN", "pais": "CHINA", "categoria": "RÍGIDOS MEZCLA", "referencia": "XF13251BB", "codigo": "XF13251BB", "cantidad_fmt": "60", "cantidad_val": 60, "p3_label": "Precio de lista", "p3": "2.05", "target": "1.90", "oferta2_val": "$1.90", "target3_val": "$1.90", "pendiente": true, "linea": "DENIM"}, {"proveedor": "XINLAN", "pais": "CHINA", "categoria": "MEZCLAS PREMIUM", "referencia": "XF723494BB", "codigo": "XF723494BB", "cantidad_fmt": "60", "cantidad_val": 60, "p3_label": "Precio de lista", "p3": "2.56", "target": "2.35", "oferta2_val": "$2.46", "target3_val": "$2.42", "pendiente": true, "linea": "DENIM"}, {"proveedor": "YILONG", "pais": "CHINA", "categoria": "LABORAL PESADO", "referencia": "GRIEGO II", "codigo": "T65/C35", "cantidad_fmt": "120", "cantidad_val": 120, "p1_label": "2025 Q2", "p1": "1.48", "p2_label": "2025 Q3", "p2": "1.53", "p3_label": "2025 Q4", "p3": "1.53", "target": "1.45", "contraoferta1": "$1.49", "accionista_val": "1.47", "linea": "INSTITUCIONAL"}, {"proveedor": "YILONG", "pais": "CHINA", "categoria": "LABORAL PESADO", "referencia": "HELIOS", "codigo": "16X12 108X56", "cantidad_fmt": "90", "cantidad_val": 90, "p1_label": "2025 Q2", "p1": "1.89", "p2_label": "2025 Q3", "p2": "1.94", "p3_label": "2025 Q4", "p3": "1.94", "target": "1.85", "contraoferta1": "$1.89", "accionista_val": "1.87", "linea": "INSTITUCIONAL"}, {"proveedor": "YILONG", "pais": "CHINA", "categoria": "LABORAL PESADO", "referencia": "ILIADA", "codigo": "T65/C35 20X16", "cantidad_fmt": "240", "cantidad_val": 240, "p1_label": "2025 Q2", "p1": "1.43", "p2_label": "2025 Q3", "p2": "1.48", "p3_label": "2025 Q4", "p3": "1.48", "target": "1.40", "contraoferta1": "$1.44", "accionista_val": "1.42", "linea": "INSTITUCIONAL"}, {"proveedor": "YILONG", "pais": "CHINA", "categoria": "LABORAL PESADO", "referencia": "LIRA", "codigo": "T65/C35 21X16", "cantidad_fmt": "30", "cantidad_val": 30, "p1_label": "2025 Q2", "p1": "1.40", "p2_label": "2025 Q3", "p2": "1.40", "p3_label": "2025 Q4", "p3": "1.40", "target": "1.35", "contraoferta1": "$1.37", "accionista_val": "1.36", "linea": "INSTITUCIONAL"}, {"proveedor": "XINKE", "pais": "CHINA", "categoria": "IGNÍFUGOS", "referencia": "FRARCTEX-2400 + FRDURATEX-CO340 (promedio)", "codigo": "FRARCTEX-2400", "cantidad_fmt": "150", "cantidad_val": 150, "p3_label": "Último prom.", "p3": "5.12", "target": "4.98", "pendiente": true, "linea": "INSTITUCIONAL"}, {"proveedor": "XINLAN", "pais": "CHINA", "categoria": "RÍGIDOS MEZCLA", "referencia": "XFS23047FB", "codigo": "XFS23047FB", "cantidad_fmt": "60", "cantidad_val": 60, "p3_label": "Precio de lista", "p3": "2.38", "target": "2.16", "oferta2_val": "$2.30", "target3_val": "$2.28", "pendiente": true, "linea": "DENIM"}];
+
+function negId(proveedor, referencia){ return 'neg_'+slug((proveedor||'')+'_'+(referencia||'')); }
+function nuevaNegociacion(){
+  return { id:uid(), proveedor:'', pais:'CHINA', linea:LINEAS_NEG[0], categoria:'', referencia:'', codigo:'',
+    cantidad_fmt:'', cantidad_val:null,
+    p1_label:'', p1:'', p2_label:'', p2:'', p3_label:'', p3:'',
+    target:'', contraoferta1:'', accionista_val:'', oferta2_val:'', target3_val:'', unidad:'',
+    fecha_creacion:Date.now(), fecha_edicion:Date.now() };
+}
+function cargarSemillaNegociacion(cb){
+  var pend = SEED_NEGOCIACION_R1.length;
+  if(!pend){ cb&&cb(); return; }
+  SEED_NEGOCIACION_R1.forEach(function(s){
+    var r = Object.assign({}, s, { id:negId(s.proveedor,s.referencia), fecha_creacion:Date.now(), fecha_edicion:Date.now() });
+    dbPut('negociacion', r, function(){ pend--; if(pend===0) cb&&cb(); });
+  });
+}
+function parseMoneyNeg(v){
+  if(v===null||v===undefined) return null;
+  var s = String(v).replace('$','').replace(',', '.').trim();
+  if(s==='') return null;
+  var n = parseFloat(s);
+  return isNaN(n)? null : n;
+}
+function fmtMoneyNeg(v){ var n=parseMoneyNeg(v); return n===null? null : ('$'+n.toFixed(2)); }
+function addDollarNeg(v){ v=(v||'').trim(); if(!v) return ''; return v.charAt(0)==='$'? v : ('$'+v); }
+function stripDollarNeg(v){ return v? String(v).replace('$','') : ''; }
+function computeGapNeg(r){
+  var t3=parseMoneyNeg(r.target3_val), t2=parseMoneyNeg(r.accionista_val), t1=parseMoneyNeg(r.target);
+  var target = (t3!==null)? t3 : ((t2!==null)? t2 : t1);
+  var o2=parseMoneyNeg(r.oferta2_val), o1=parseMoneyNeg(r.contraoferta1);
+  var oferta = (o2!==null)? o2 : o1;
+  if(oferta===null || target===null || target===0){
+    return { hasGap:false, gap_num:9999, gap_display:'Pendiente respuesta' };
+  }
+  var pct = ((oferta-target)/target)*100;
+  var signo = pct>=0? '+' : '';
+  return { hasGap:true, gap_num:pct, gap_display: signo+pct.toFixed(1)+'%' };
+}
+function aplicarFiltroNegociacion(all){
+  var f = STATE.negFiltro;
+  return all.filter(function(r){
+    return (!f.pais || r.pais===f.pais) &&
+           (!f.linea || r.linea===f.linea) &&
+           (!f.proveedor || r.proveedor===f.proveedor) &&
+           (!f.ref || (r.referencia||'').toUpperCase().indexOf(f.ref.toUpperCase())>=0);
+  });
+}
+function viewNegCard(r){
+  var g = computeGapNeg(r);
+  var gapClase = !g.hasGap? '' : (g.gap_num<=0? 'resuelto' : (g.gap_num<=5? 'pendiente':'confuso'));
+  var prov = r.proveedor_anterior? (escapeHtml(r.proveedor)+' <span class="muted" style="font-size:10.5px">antes: '+escapeHtml(r.proveedor_anterior)+'</span>') : escapeHtml(r.proveedor);
+  var unidadTxt = r.unidad==='kg'? '/kg' : '';
+  var pasos = [];
+  if(parseMoneyNeg(r.target)!==null) pasos.push('T '+fmtMoneyNeg(r.target));
+  if(parseMoneyNeg(r.contraoferta1)!==null) pasos.push('O1 '+fmtMoneyNeg(r.contraoferta1));
+  if(parseMoneyNeg(r.accionista_val)!==null) pasos.push('T2 '+fmtMoneyNeg(r.accionista_val));
+  if(parseMoneyNeg(r.oferta2_val)!==null) pasos.push('O2 '+fmtMoneyNeg(r.oferta2_val));
+  if(parseMoneyNeg(r.target3_val)!==null) pasos.push('T3 '+fmtMoneyNeg(r.target3_val));
+  var lineaPrecios = pasos.length? (pasos.join(' → ')+unidadTxt) : '<span class="muted">sin precios cargados</span>';
+  return '<div class="reg-item">'+
+    '<div class="top"><strong>'+prov+' — '+escapeHtml(r.referencia)+'</strong>'+
+      (gapClase? '<span class="pill '+gapClase+'">'+g.gap_display+'</span>' : '<span class="muted" style="font-size:11px">'+g.gap_display+'</span>')+
+    '</div>'+
+    '<div class="muted" style="font-size:11.5px">'+escapeHtml(r.linea||'—')+' · '+escapeHtml(r.pais||'—')+(r.cantidad_fmt? (' · '+escapeHtml(r.cantidad_fmt)+' mil m') : '')+'</div>'+
+    '<div style="font-size:12.5px;margin-top:4px">'+lineaPrecios+'</div>'+
+    '<div class="grid2" style="margin-top:8px">'+
+      '<button class="ghost" data-editneg="'+r.id+'" style="font-size:12px">✏️ Editar</button>'+
+      '<button class="ghost danger" data-delneg="'+r.id+'" style="font-size:12px">🗑️ Eliminar</button>'+
+    '</div>'+
+  '</div>';
+}
+function viewNegociacionBody(all){
+  var f = STATE.negFiltro;
+  var paises = Array.from(new Set(all.map(function(r){return r.pais;}).filter(Boolean))).sort();
+  var lineas = Array.from(new Set(all.map(function(r){return r.linea;}).filter(Boolean))).sort();
+  var provs = Array.from(new Set(all.map(function(r){return r.proveedor;}).filter(Boolean))).sort();
+  var filtrados = aplicarFiltroNegociacion(all);
+  filtrados.forEach(function(r){ r._gap = computeGapNeg(r); });
+  filtrados.sort(function(a,b){ return b._gap.gap_num - a._gap.gap_num; });
+
+  var conOferta = filtrados.filter(function(r){return r._gap.hasGap;}).length;
+  var pendientes = filtrados.length - conOferta;
+  var gapsArr = filtrados.filter(function(r){return r._gap.hasGap;}).map(function(r){return r._gap.gap_num;});
+  var avgGap = gapsArr.length? (gapsArr.reduce(function(a,b){return a+b;},0)/gapsArr.length).toFixed(1) : '—';
+
+  var kpis = '<div class="grid2">'+
+      '<div class="card" style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--navy)">'+filtrados.length+'</div><div class="muted" style="font-size:11px">Referencias en vista</div></div>'+
+      '<div class="card" style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--navy)">'+conOferta+'</div><div class="muted" style="font-size:11px">Con oferta recibida</div></div>'+
+    '</div><div class="grid2">'+
+      '<div class="card" style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--navy)">'+pendientes+'</div><div class="muted" style="font-size:11px">Pendientes de respuesta</div></div>'+
+      '<div class="card" style="text-align:center"><div style="font-size:20px;font-weight:800;color:var(--navy)">'+avgGap+'%</div><div class="muted" style="font-size:11px">Gap promedio</div></div>'+
+    '</div>';
+
+  var filtros = '<div class="card">'+
+    '<label class="small">Filtros</label>'+
+    '<select id="fNegPais"><option value="">País: todos</option>'+paises.map(function(p){return '<option '+(f.pais===p?'selected':'')+'>'+escapeHtml(p)+'</option>';}).join('')+'</select>'+
+    '<div class="grid2">'+
+      '<select id="fNegLinea"><option value="">Línea: todas</option>'+lineas.map(function(l){return '<option '+(f.linea===l?'selected':'')+'>'+escapeHtml(l)+'</option>';}).join('')+'</select>'+
+      '<select id="fNegProveedor"><option value="">Proveedor: todos</option>'+provs.map(function(p){return '<option '+(f.proveedor===p?'selected':'')+'>'+escapeHtml(p)+'</option>';}).join('')+'</select>'+
+    '</div>'+
+    '<input id="fNegRef" value="'+escapeHtml(f.ref)+'" placeholder="Buscar referencia...">'+
+    '<button class="ghost" id="btnLimpiarFiltroNeg" style="font-size:12px">Limpiar filtros</button>'+
+  '</div>';
+
+  var lista = filtrados.length? filtrados.map(viewNegCard).join('') : '<p class="muted">Sin referencias que coincidan con el filtro.</p>';
+
+  return kpis + filtros +
+    '<div class="grid2"><button class="teal" id="btnNuevaNeg">➕ Agregar referencia manual</button><button class="sec" id="btnExportNegCsv">⬇️ Excel (CSV)</button></div>'+
+    '<h3 style="margin-top:14px">Referencias ('+filtrados.length+')</h3>'+
+    lista;
+}
+function renderNegociacion(app){
+  if(STATE.negForm){ app.innerHTML = viewNegForm(STATE.negForm); return; }
+  app.innerHTML = '<h2>Negociación</h2>'+
+    '<p class="muted">Ronda de precios Q1-2027 — Target / Oferta del proveedor / Gap, mismo criterio del cuadro para el Accionista Mayor (regla de Gap confirmada el 14-ago-2026).</p>'+
+    '<div id="negBody"><p class="muted">Cargando…</p></div>';
+  dbGetAll('negociacion', function(all){
+    STATE._negAll = all;
+    var body = document.getElementById('negBody');
+    if(!body) return;
+    if(!all.length){
+      body.innerHTML = '<div class="card"><p>Sin referencias cargadas todavía.</p>'+
+        '<button class="teal" id="btnCargarSemillaNeg" style="width:100%">⬇️ Cargar Ronda 1 Q1-2027 (42 referencias)</button>'+
+        '<button class="sec" id="btnNuevaNeg" style="width:100%;margin-top:8px">➕ Agregar referencia manual</button>'+
+      '</div>';
+    } else {
+      body.innerHTML = viewNegociacionBody(all);
+    }
+    wireNegociacion();
+  });
+}
+function viewNegForm(x){
+  return ''+
+  '<h2>'+(x._esNuevo? 'Nueva referencia' : 'Editar referencia')+'</h2>'+
+  '<div class="card">'+
+    '<label class="small">Proveedor</label>'+
+    '<input id="fNegProveedorForm" list="listaProveedoresNeg" value="'+escapeHtml(x.proveedor)+'" placeholder="Ej: XINLAN">'+
+    '<datalist id="listaProveedoresNeg">'+PROVEEDORES_CATALOGO.map(function(p){return '<option value="'+escapeHtml(p.n.toUpperCase())+'">';}).join('')+'</datalist>'+
+    '<label class="small">Referencia</label>'+
+    '<input id="fNegReferenciaForm" value="'+escapeHtml(x.referencia)+'" placeholder="Ej: POSITANO (MASCULINO)">'+
+    '<div class="grid2">'+
+      '<div><label class="small">País</label><select id="fNegPaisForm">'+['CHINA','INDIA','TURQUIA','BRASIL','PERU','OTRO'].map(function(p){return '<option '+(x.pais===p?'selected':'')+'>'+p+'</option>';}).join('')+'</select></div>'+
+      '<div><label class="small">Línea</label><select id="fNegLineaForm">'+LINEAS_NEG.map(function(l){return '<option '+(x.linea===l?'selected':'')+'>'+l+'</option>';}).join('')+'</select></div>'+
+    '</div>'+
+    '<div class="grid2">'+
+      '<div><label class="small">Categoría</label><input id="fNegCategoriaForm" value="'+escapeHtml(x.categoria)+'"></div>'+
+      '<div><label class="small">Código</label><input id="fNegCodigoForm" value="'+escapeHtml(x.codigo)+'"></div>'+
+    '</div>'+
+    '<label class="small">Cantidad (miles de metros)</label>'+
+    '<input id="fNegCantidadForm" inputmode="decimal" value="'+escapeHtml(x.cantidad_fmt)+'" placeholder="Ej: 120">'+
+  '</div>'+
+  '<div class="card">'+
+    '<label class="small">Histórico (últimos precios conocidos)</label>'+
+    '<div class="grid2"><input id="fNegP1LabelForm" value="'+escapeHtml(x.p1_label)+'" placeholder="Ej: 2025 Q2"><input id="fNegP1Form" inputmode="decimal" value="'+escapeHtml(x.p1)+'" placeholder="Precio"></div>'+
+    '<div class="grid2"><input id="fNegP2LabelForm" value="'+escapeHtml(x.p2_label)+'" placeholder="Ej: 2025 Q3"><input id="fNegP2Form" inputmode="decimal" value="'+escapeHtml(x.p2)+'" placeholder="Precio"></div>'+
+    '<div class="grid2"><input id="fNegP3LabelForm" value="'+escapeHtml(x.p3_label)+'" placeholder="Ej: 2025 Q4 / Precio de lista"><input id="fNegP3Form" inputmode="decimal" value="'+escapeHtml(x.p3)+'" placeholder="Precio"></div>'+
+  '</div>'+
+  '<div class="card">'+
+    '<label class="small">Negociación</label>'+
+    '<div class="grid2"><div><label class="small">Target (Ronda 1)</label><input id="fNegTargetForm" inputmode="decimal" value="'+escapeHtml(x.target)+'"></div>'+
+    '<div><label class="small">Oferta 1</label><input id="fNegOferta1Form" inputmode="decimal" value="'+escapeHtml(stripDollarNeg(x.contraoferta1))+'"></div></div>'+
+    '<div class="grid2"><div><label class="small">Target 2</label><input id="fNegTarget2Form" inputmode="decimal" value="'+escapeHtml(x.accionista_val)+'"></div>'+
+    '<div><label class="small">Oferta 2</label><input id="fNegOferta2Form" inputmode="decimal" value="'+escapeHtml(stripDollarNeg(x.oferta2_val))+'"></div></div>'+
+    '<label class="small">Target 3</label><input id="fNegTarget3Form" inputmode="decimal" value="'+escapeHtml(stripDollarNeg(x.target3_val))+'">'+
+    '<label class="small">Unidad</label><select id="fNegUnidadForm"><option value="" '+(!x.unidad?'selected':'')+'>USD/metro</option><option value="kg" '+(x.unidad==='kg'?'selected':'')+'>USD/kg</option></select>'+
+  '</div>'+
+  '<div class="wizard-nav">'+
+    '<button class="sec" id="btnCancelarNeg">Cancelar</button>'+
+    '<button class="teal" id="btnGuardarNeg">✓ Guardar referencia</button>'+
+  '</div>'+
+  (x._esNuevo? '' : '<button class="danger" id="btnBorrarNegForm" style="width:100%;margin-top:10px">🗑️ Eliminar esta referencia</button>');
+}
+function wireNegociacion(){
+  if(STATE.negForm){
+    var x = STATE.negForm;
+    on('btnCancelarNeg', function(){ STATE.negForm=null; render(); });
+    on('btnGuardarNeg', function(){
+      x.proveedor = val('fNegProveedorForm').trim();
+      x.referencia = val('fNegReferenciaForm').trim();
+      if(!x.proveedor || !x.referencia){ toast('Proveedor y Referencia son obligatorios.'); return; }
+      x.pais = val('fNegPaisForm');
+      x.linea = val('fNegLineaForm');
+      x.categoria = val('fNegCategoriaForm');
+      x.codigo = val('fNegCodigoForm');
+      x.cantidad_fmt = val('fNegCantidadForm').trim();
+      x.cantidad_val = x.cantidad_fmt? parseFloat(x.cantidad_fmt.replace(',','.')) : null;
+      x.p1_label = val('fNegP1LabelForm'); x.p1 = val('fNegP1Form').trim();
+      x.p2_label = val('fNegP2LabelForm'); x.p2 = val('fNegP2Form').trim();
+      x.p3_label = val('fNegP3LabelForm'); x.p3 = val('fNegP3Form').trim();
+      x.target = val('fNegTargetForm').trim();
+      x.contraoferta1 = addDollarNeg(val('fNegOferta1Form'));
+      x.accionista_val = val('fNegTarget2Form').trim();
+      x.oferta2_val = addDollarNeg(val('fNegOferta2Form'));
+      x.target3_val = addDollarNeg(val('fNegTarget3Form'));
+      x.unidad = val('fNegUnidadForm');
+      x.fecha_edicion = Date.now(); delete x._esNuevo;
+      dbPut('negociacion', x, function(){ toast('Referencia guardada ✓'); STATE.negForm=null; render(); });
+    });
+    on('btnBorrarNegForm', function(){
+      customConfirm('¿Eliminar esta referencia? No se puede deshacer.', function(){
+        dbDelete('negociacion', x.id, function(){ toast('Referencia eliminada.'); STATE.negForm=null; render(); });
+      });
+    });
+    return;
+  }
+  on('btnCargarSemillaNeg', function(){
+    cargarSemillaNegociacion(function(){ toast('Ronda 1 Q1-2027 cargada ✓ (42 referencias)'); render(); });
+  });
+  on('btnNuevaNeg', function(){
+    var x = nuevaNegociacion(); x._esNuevo=true; STATE.negForm=x; render();
+  });
+  on('btnExportNegCsv', exportarNegociacionCSV);
+  on('btnLimpiarFiltroNeg', function(){
+    STATE.negFiltro = {pais:'', linea:'', proveedor:'', ref:''};
+    var body = document.getElementById('negBody');
+    if(body){ body.innerHTML = viewNegociacionBody(STATE._negAll); wireNegociacion(); }
+  });
+  ['fNegPais','fNegLinea','fNegProveedor'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el) el.onchange = function(){
+      STATE.negFiltro.pais = val('fNegPais');
+      STATE.negFiltro.linea = val('fNegLinea');
+      STATE.negFiltro.proveedor = val('fNegProveedor');
+      var body = document.getElementById('negBody');
+      if(body){ body.innerHTML = viewNegociacionBody(STATE._negAll); wireNegociacion(); }
+    };
+  });
+  var refElNeg = document.getElementById('fNegRef');
+  if(refElNeg) refElNeg.oninput = function(){
+    STATE.negFiltro.ref = val('fNegRef');
+    var body = document.getElementById('negBody');
+    if(body){ body.innerHTML = viewNegociacionBody(STATE._negAll); wireNegociacion(); }
+  };
+}
+function exportarNegociacionCSV(){
+  dbGetAll('negociacion', function(all){
+    var filtrados = aplicarFiltroNegociacion(all);
+    filtrados.forEach(function(r){ r._gap = computeGapNeg(r); });
+    var rows = [['Línea','País','Proveedor','Referencia','Código','Cantidad (miles m)','Hist.1','Hist.2','Hist.3','Target','Oferta 1','Target 2','Oferta 2','Target 3','Gap']];
+    filtrados.forEach(function(r){
+      rows.push([r.linea||'', r.pais||'', r.proveedor||'', r.referencia||'', r.codigo||'', r.cantidad_fmt||'',
+        (r.p1_label?r.p1_label+': ':'')+(r.p1||''), (r.p2_label?r.p2_label+': ':'')+(r.p2||''), (r.p3_label?r.p3_label+': ':'')+(r.p3||''),
+        r.target||'', r.contraoferta1||'', r.accionista_val||'', r.oferta2_val||'', r.target3_val||'', r._gap.gap_display]);
+    });
+    var csv = rows.map(function(r){
+      return r.map(function(c){
+        var s = (c==null? '' : String(c));
+        if(s.indexOf(',')>=0 || s.indexOf('"')>=0 || s.indexOf('\n')>=0){ s = '"'+s.replace(/"/g,'""')+'"'; }
+        return s;
+      }).join(',');
+    }).join('\r\n');
+    var blob = new Blob(["﻿"+csv], {type:'text/csv;charset=utf-8;'});
+    var aEl = document.createElement('a');
+    aEl.href = URL.createObjectURL(blob);
+    aEl.download = 'Negociacion_Q1-2027_'+(new Date().toISOString().slice(0,10))+'.csv';
+    document.body.appendChild(aEl); aEl.click(); aEl.remove();
+    toast("Excel (CSV) descargado.");
+  });
+}
+
 /* ---------- Navegación inferior / tema / red ---------- */
 document.querySelectorAll('.navbar button').forEach(function(b){
   b.onclick = function(){ setView(b.dataset.view); };
@@ -3078,6 +3357,25 @@ document.getElementById('app').addEventListener('click', function(ev){
   if(itCerrarRes){
     invalidarResumenDossier();
     render();
+    return;
+  }
+  /* Negociación (Módulo 8) — igual que Gastos/Planeación/Dossier arriba: la
+     lista se llena async vía dbGetAll, así que se delega al contenedor #app. */
+  var itEditNeg = ev.target.closest('[data-editneg]');
+  if(itEditNeg){
+    var idEn = itEditNeg.getAttribute('data-editneg');
+    dbGetAll('negociacion', function(all){
+      var x = all.find(function(r){ return String(r.id)===String(idEn); }); if(!x) return;
+      STATE.negForm = x; render();
+    });
+    return;
+  }
+  var itDelNeg = ev.target.closest('[data-delneg]');
+  if(itDelNeg){
+    var idDn = itDelNeg.getAttribute('data-delneg');
+    customConfirm('¿Eliminar esta referencia? No se puede deshacer.', function(){
+      dbDelete('negociacion', idDn, function(){ toast('Referencia eliminada.'); render(); });
+    });
     return;
   }
 });
