@@ -1,3 +1,4 @@
+/* retry-deploy-marker: 1786990180 */
 /* Service Worker — Ferias Captura de Campo
    Objetivo: que la app cargue y funcione SIN internet después de la primera
    vez que se abre con wifi/datos — para usarla en países con restricciones
