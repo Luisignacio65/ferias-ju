@@ -2056,6 +2056,20 @@ function nuevoExpositor(feria){
     prioridad:'secundario', coleccion_nueva:false, visitado:false,
     fecha_creacion:Date.now(), fecha_edicion:Date.now() };
 }
+/* Ferias separadas (2026-08-17, a pedido de Luis): antes todo expositor
+   nuevo quedaba con el texto combinado del encabezado ("Intertextile SH +
+   Texworld/PV Paris") como único valor de feria, así que el filtro no podía
+   separar una feria de otra. Ahora cada expositor lleva un código corto
+   propio (IT / PV / TW), elegible en el formulario y en la carga masiva —
+   totalmente aparte de #feriaActiva, que sigue igual para Objetivos (Luis
+   pidió explícitamente NO tocar eso: un objetivo por línea, igual para
+   las 3 ferias). Los 284 expositores ya cargados se re-etiquetaron una vez
+   (2026-08-17) leyendo el prefijo de su nombre ([TW-...] / [PV-...]). */
+var FERIAS_MVP = ['IT','PV','TW'];
+var FERIA_LABEL = {IT:'Intertextile', PV:'Premiere Vision', TW:'Texworld'};
+function feriaPorDefecto(){
+  return (STATE.planFiltro.feria && FERIAS_MVP.indexOf(STATE.planFiltro.feria)>=0)? STATE.planFiltro.feria : FERIAS_MVP[0];
+}
 /* Orden alfanumérico simple para Hall/Stand (ej: "A2" antes que "A10") —
    sin esto, un sort de texto normal pondría "A10" antes que "A2". */
 function compareAlfaNum(a,b){
@@ -2072,6 +2086,8 @@ function viewExpositorForm(x){
   return ''+
   '<h2>'+(x._esNuevo? 'Nuevo expositor' : 'Editar expositor')+'</h2>'+
   '<div class="card">'+
+    '<label class="small">Feria</label>'+
+    '<select id="fExpFeria">'+FERIAS_MVP.map(function(fc){return '<option value="'+fc+'" '+(x.feria===fc?'selected':'')+'>'+fc+' — '+FERIA_LABEL[fc]+'</option>';}).join('')+'</select>'+
     '<label class="small">Nombre</label>'+
     '<input id="fExpNombre" value="'+escapeHtml(x.nombre)+'" placeholder="Nombre del proveedor/expositor">'+
     '<div class="grid2">'+
@@ -2197,6 +2213,8 @@ function renderPlaneacion(app){
     '<h2>Planeación</h2>'+
     '<p class="muted">Feria activa: <strong>'+escapeHtml(feriaActiva)+'</strong> — listado de expositores y plan de visita. Los objetivos por línea están en la pestaña 🎯 Objetivos.</p>'+
     '<div class="card">'+
+      '<label class="small">Feria de esta lista</label>'+
+      '<select id="fBulkFeria">'+FERIAS_MVP.map(function(fc){return '<option value="'+fc+'" '+(feriaPorDefecto()===fc?'selected':'')+'>'+fc+' — '+FERIA_LABEL[fc]+'</option>';}).join('')+'</select>'+
       '<label class="small">Cargar expositores (pega la lista: nombre, hall, stand — separados por tab, coma o " - ", una fila por expositor)</label>'+
       '<textarea id="fBulkExpositores" placeholder="Ej: Kukrer, Hall 3, B12"></textarea>'+
       '<button class="teal" id="btnCargarBulk" style="width:100%">⬇️ Cargar lista</button>'+
@@ -2218,7 +2236,8 @@ function renderPlaneacion(app){
     if(selFeria){
       var ferias = feriasDistintasExpositor(all);
       selFeria.innerHTML = '<option value="">Feria: todas</option>'+ferias.map(function(f){
-        return '<option '+(STATE.planFiltro.feria===f?'selected':'')+'>'+escapeHtml(f)+'</option>';
+        var etiqueta = FERIA_LABEL[f]? (f+' — '+FERIA_LABEL[f]) : f;
+        return '<option value="'+escapeHtml(f)+'" '+(STATE.planFiltro.feria===f?'selected':'')+'>'+escapeHtml(etiqueta)+'</option>';
       }).join('');
       if(STATE.planFiltro.feria && ferias.indexOf(STATE.planFiltro.feria)>=0) selFeria.value = STATE.planFiltro.feria;
     }
@@ -2281,6 +2300,7 @@ function wirePlaneacion(){
     var x = STATE.planExpForm;
     on('btnCancelarExp', function(){ STATE.planExpForm=null; render(); });
     on('btnGuardarExp', function(){
+      x.feria = val('fExpFeria') || x.feria;
       x.nombre = val('fExpNombre'); x.hall = val('fExpHall'); x.stand = val('fExpStand');
       x.prioridad = val('fExpPrioridad');
       var cbNueva = document.getElementById('fExpNueva'); x.coleccion_nueva = cbNueva? cbNueva.checked : false;
@@ -2296,12 +2316,12 @@ function wirePlaneacion(){
     return;
   }
   on('btnNuevoExpositor', function(){
-    var x = nuevoExpositor(feriaActivaTexto()); x._esNuevo=true; STATE.planExpForm=x; render();
+    var x = nuevoExpositor(feriaPorDefecto()); x._esNuevo=true; STATE.planExpForm=x; render();
   });
   on('btnCargarBulk', function(){
     var raw = val('fBulkExpositores');
     if(!raw || !raw.trim()){ toast('Pega la lista primero.'); return; }
-    var feria = feriaActivaTexto();
+    var feria = val('fBulkFeria') || feriaPorDefecto();
     var lineas = raw.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l; });
     if(!lineas.length){ return; }
     var pend = lineas.length;
@@ -2535,6 +2555,7 @@ function renderDossier(app){
               '<button class="ghost" data-edititin="'+it.id+'" style="font-size:12px">✏️ Editar</button>'+
               '<button class="ghost danger" data-delitin="'+it.id+'" style="font-size:12px">🗑️ Eliminar</button>'+
             '</div>'+
+            '<button class="ghost" data-convitin="'+it.id+'" style="font-size:12px;width:100%;margin-top:6px">🔁 Convertir a reserva (vuelo/hotel/restaurante...)</button>'+
           '</div>';
         }).join('');
         return '<h4 style="margin-top:12px">'+f+'</h4>'+filas;
@@ -2569,6 +2590,7 @@ function renderDossier(app){
             '<button class="ghost" data-editres="'+r.id+'" style="font-size:12px">✏️ Editar</button>'+
             '<button class="ghost danger" data-delres="'+r.id+'" style="font-size:12px">🗑️ Eliminar</button>'+
           '</div>'+
+          '<button class="ghost" data-convres="'+r.id+'" style="font-size:12px;width:100%;margin-top:6px">🔁 Convertir a actividad de itinerario</button>'+
         '</div>';
       }).join('');
       return '<div class="card"><h3 class="cat-titulo">'+CATEGORIA_ICONO(cat)+' '+escapeHtml(cat)+'</h3>'+filas+'</div>';
@@ -3500,6 +3522,42 @@ document.getElementById('app').addEventListener('click', function(ev){
     customConfirm('¿Eliminar esta actividad? No se puede deshacer.', function(){
       invalidarResumenDossier();
       dbDelete('dossier', idDix, function(){ toast('Actividad eliminada.'); render(); });
+    });
+    return;
+  }
+  /* Conversión itinerario <-> reserva (2026-08-17): para el caso típico de
+     Luis — una actividad quedó cargada con el botón equivocado (ej. una
+     reserva de restaurante metida como "actividad de itinerario") — sin
+     tener que borrar y volver a escribir todo de nuevo. Conserva id, viaje,
+     fecha, hora y lugar; solo cambia el `tipo` y remapea los campos propios
+     de cada uno. */
+  var itConvItin = ev.target.closest('[data-convitin]');
+  if(itConvItin){
+    var idCix = itConvItin.getAttribute('data-convitin');
+    dbGetAll('dossier', function(all){
+      var it = all.find(function(r){ return String(r.id)===String(idCix); }); if(!it) return;
+      customConfirm('¿Convertir esta actividad en una reserva (categoría Restaurante, editable después)?', function(){
+        var res = nuevaReserva(it.viaje);
+        res.id = it.id; res.fecha = it.fecha; res.hora = it.hora; res.lugar = it.lugar;
+        res.categoria = 'Restaurante'; res.titulo = it.descripcion || '';
+        invalidarResumenDossier();
+        dbPut('dossier', res, function(){ toast('Convertida a reserva ✓ — revisa/ajusta los datos.'); STATE.dossierForm = res; render(); });
+      });
+    });
+    return;
+  }
+  var itConvRes = ev.target.closest('[data-convres]');
+  if(itConvRes){
+    var idCrx = itConvRes.getAttribute('data-convres');
+    dbGetAll('dossier', function(all){
+      var r0 = all.find(function(r){ return String(r.id)===String(idCrx); }); if(!r0) return;
+      customConfirm('¿Convertir esta reserva en una actividad de itinerario (editable después)?', function(){
+        var itn = nuevoItinerario(r0.viaje);
+        itn.id = r0.id; itn.fecha = r0.fecha; itn.hora = r0.hora; itn.lugar = r0.lugar;
+        itn.actividad = 'Otro'; itn.descripcion = r0.titulo || '';
+        invalidarResumenDossier();
+        dbPut('dossier', itn, function(){ toast('Convertida a itinerario ✓ — revisa/ajusta los datos.'); STATE.dossierItinForm = itn; render(); });
+      });
     });
     return;
   }
