@@ -244,6 +244,7 @@ body.unlocked #lockScreen{ display:none !important; }
 <header class="top">
   <div class="brand">📋 Ferias — Captura<small id="feriaActiva">Intertextile SH + Texworld/PV Paris · 25 ago-4 sept 2026</small></div>
   <div class="tools">
+    <span class="muted" id="appVersionTag" style="font-size:10.5px">v?</span>
     <span class="badge-net off" id="netBadge">Sin señal</span>
     <button class="icon" id="btnNoche" title="Día/Noche">🌙</button>
   </div>
@@ -826,6 +827,14 @@ function extraerCamposComprobante(texto){
     texto_ocr: texto
   };
 }
+
+/* Versión visible en pantalla (2026-08-18, a pedido de Luis): la app es un
+   PWA offline-first — el celular a veces se queda con una versión vieja en
+   caché y no es evidente a simple vista. Este numerito (mismo valor que
+   CACHE_NAME en sw.js) permite confirmar en 2 segundos, mirando la pantalla
+   de inicio, si el celular ya tiene lo último — sin tener que adivinar por
+   los síntomas. Súbelo junto con CACHE_NAME en cada publicación. */
+var APP_VERSION = 'v18';
 
 /* ---------- Estado de la app ---------- */
 var STATE = {
@@ -2236,12 +2245,19 @@ function renderPlaneacion(app){
   dbGetAll('planeacion', function(all){
     var selFeria = document.getElementById('fFiltroFeriaPlan');
     if(selFeria){
-      var ferias = feriasDistintasExpositor(all);
-      selFeria.innerHTML = '<option value="">Feria: todas</option>'+ferias.map(function(f){
+      // Lista FIJA (Todas/IT/PV/TW) — antes solo aparecían las ferias con
+      // expositores ya cargados, así que Intertextile no se veía como opción
+      // hasta tener el primer expositor. Luis pidió que las 4 opciones estén
+      // siempre disponibles, cargados o no. Si aparece algún valor de feria
+      // viejo/atípico en los datos (no IT/PV/TW), se agrega al final para no
+      // esconder nada silenciosamente.
+      var otras = feriasDistintasExpositor(all).filter(function(f){ return FERIAS_MVP.indexOf(f)<0; });
+      var listaFerias = FERIAS_MVP.concat(otras);
+      selFeria.innerHTML = '<option value="">Feria: todas</option>'+listaFerias.map(function(f){
         var etiqueta = FERIA_LABEL[f]? (f+' — '+FERIA_LABEL[f]) : f;
         return '<option value="'+escapeHtml(f)+'" '+(STATE.planFiltro.feria===f?'selected':'')+'>'+escapeHtml(etiqueta)+'</option>';
       }).join('');
-      if(STATE.planFiltro.feria && ferias.indexOf(STATE.planFiltro.feria)>=0) selFeria.value = STATE.planFiltro.feria;
+      if(STATE.planFiltro.feria && listaFerias.indexOf(STATE.planFiltro.feria)>=0) selFeria.value = STATE.planFiltro.feria;
     }
     var todos = all.filter(function(x){ return x.tipo==='expositor'; });
     var expositores = todos.filter(function(x){
@@ -3702,6 +3718,7 @@ if(window.visualViewport){
 /* ---------- Arranque ---------- */
 (function init(){
   try{ if(localStorage.getItem('ferias_tema')==='noche'){ document.body.classList.add('noche'); document.getElementById('btnNoche').textContent='☀️'; } }catch(e){}
+  var vTag = document.getElementById('appVersionTag'); if(vTag) vTag.textContent = APP_VERSION;
   actualizarRed();
   ajustarEspacioNavbar();
   openDB(function(){ recuperarBorradores(function(){ render(); ajustarEspacioNavbar(); }); });
