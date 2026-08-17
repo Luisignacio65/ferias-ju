@@ -834,7 +834,7 @@ function extraerCamposComprobante(texto){
    CACHE_NAME en sw.js) permite confirmar en 2 segundos, mirando la pantalla
    de inicio, si el celular ya tiene lo último — sin tener que adivinar por
    los síntomas. Súbelo junto con CACHE_NAME en cada publicación. */
-var APP_VERSION = 'v18';
+var APP_VERSION = 'v19';
 
 /* ---------- Estado de la app ---------- */
 var STATE = {
@@ -2079,6 +2079,36 @@ var FERIA_LABEL = {IT:'Intertextile', PV:'Premiere Vision', TW:'Texworld'};
 function feriaPorDefecto(){
   return (STATE.planFiltro.feria && FERIAS_MVP.indexOf(STATE.planFiltro.feria)>=0)? STATE.planFiltro.feria : FERIAS_MVP[0];
 }
+function actualizarEtiquetaBulkFeria(){
+  var lbl = document.getElementById('bulkFeriaEtiqueta');
+  if(!lbl) return;
+  var f = STATE.planFiltro.feria;
+  lbl.textContent = (f && FERIA_LABEL[f])? (f+' — '+FERIA_LABEL[f]) : 'elige una feria arriba primero';
+}
+/* Corrige el campo feria de expositores ya cargados leyendo el prefijo de
+   su nombre — ej. "[IT] Foshan..." o "[TW-Denim] Blue Denim...". Existe
+   porque cada celular/computador tiene su PROPIA base de datos (no se
+   sincronizan entre sí): cuando se separaron las ferias (2026-08-17) solo
+   se pudo corregir a mano la copia de un aparato. Este botón deja que Luis
+   corrija cualquier otra copia él mismo, en un toque, sin escribir nada. */
+function corregirFeriaPorPrefijo(cb){
+  dbGetAll('planeacion', function(all){
+    var exps = all.filter(function(x){ return x.tipo==='expositor'; });
+    var cambios = [];
+    exps.forEach(function(x){
+      var m = (x.nombre||'').match(/^\[(IT|PV|TW)(-[^\]]+)?\]/i);
+      if(m){
+        var codigo = m[1].toUpperCase();
+        if(x.feria !== codigo){ x.feria = codigo; cambios.push(x); }
+      }
+    });
+    if(!cambios.length){ cb(0, exps.length); return; }
+    var pend = cambios.length;
+    cambios.forEach(function(x){
+      dbPut('planeacion', x, function(){ pend--; if(pend===0) cb(cambios.length, exps.length); });
+    });
+  });
+}
 /* Orden alfanumérico simple para Hall/Stand (ej: "A2" antes que "A10") —
    sin esto, un sort de texto normal pondría "A10" antes que "A2". */
 function compareAlfaNum(a,b){
@@ -2224,20 +2254,19 @@ function renderPlaneacion(app){
     '<h2>Planeación</h2>'+
     '<p class="muted">Feria activa: <strong>'+escapeHtml(feriaActiva)+'</strong> — listado de expositores y plan de visita. Los objetivos por línea están en la pestaña 🎯 Objetivos.</p>'+
     '<div class="card">'+
-      '<label class="small">Feria de esta lista</label>'+
-      '<select id="fBulkFeria">'+FERIAS_MVP.map(function(fc){return '<option value="'+fc+'" '+(feriaPorDefecto()===fc?'selected':'')+'>'+fc+' — '+FERIA_LABEL[fc]+'</option>';}).join('')+'</select>'+
-      '<label class="small">Cargar expositores (pega la lista: nombre, hall, stand — separados por tab, coma o " - ", una fila por expositor)</label>'+
+      '<label class="small">Feria (filtra la lista de abajo Y define a cuál feria se cargan los expositores nuevos)</label>'+
+      '<select id="fFiltroFeriaPlan"><option value="">Feria: todas</option></select>'+
+      '<input id="fFiltroProveedorPlan" value="'+escapeHtml(STATE.planFiltro.proveedor)+'" placeholder="Buscar proveedor/expositor..." style="margin-top:8px">'+
+      '<button class="ghost" id="btnCorregirFeria" style="font-size:12px;margin-top:8px">🔧 Corregir feria automáticamente (por prefijo del nombre, ej: [IT], [TW-Denim])</button>'+
+    '</div>'+
+    '<div class="card">'+
+      '<label class="small">Cargar expositores en <strong id="bulkFeriaEtiqueta">—</strong> (pega la lista: nombre, hall, stand — separados por tab, coma o " - ", una fila por expositor)</label>'+
       '<textarea id="fBulkExpositores" placeholder="Ej: Kukrer, Hall 3, B12"></textarea>'+
       '<button class="teal" id="btnCargarBulk" style="width:100%">⬇️ Cargar lista</button>'+
     '</div>'+
     '<div class="card big"><button class="big-btn teal" id="btnNuevoExpositor" style="border-radius:10px">➕<span>+ Agregar expositor manual</span></button></div>'+
     '<div class="grid2"><button id="btnGenerarPlan">🗺️ Generar plan de visita</button><button class="sec" id="btnExportExpCsv">⬇️ Excel (CSV)</button></div>'+
     '<div id="planVisitaBody"></div>'+
-    '<div class="card">'+
-      '<label class="small">Filtros</label>'+
-      '<select id="fFiltroFeriaPlan"><option value="">Feria: todas</option></select>'+
-      '<input id="fFiltroProveedorPlan" value="'+escapeHtml(STATE.planFiltro.proveedor)+'" placeholder="Buscar proveedor/expositor...">'+
-    '</div>'+
     '<div id="infaltablesPendBody"></div>'+
     '<h3>Expositores cargados</h3>'+
     '<div id="expositoresBody"><p class="muted">Cargando…</p></div>';
@@ -2259,6 +2288,7 @@ function renderPlaneacion(app){
       }).join('');
       if(STATE.planFiltro.feria && listaFerias.indexOf(STATE.planFiltro.feria)>=0) selFeria.value = STATE.planFiltro.feria;
     }
+    actualizarEtiquetaBulkFeria();
     var todos = all.filter(function(x){ return x.tipo==='expositor'; });
     var expositores = todos.filter(function(x){
       if(STATE.planFiltro.feria && x.feria!==STATE.planFiltro.feria) return false;
@@ -2339,7 +2369,8 @@ function wirePlaneacion(){
   on('btnCargarBulk', function(){
     var raw = val('fBulkExpositores');
     if(!raw || !raw.trim()){ toast('Pega la lista primero.'); return; }
-    var feria = val('fBulkFeria') || feriaPorDefecto();
+    var feria = STATE.planFiltro.feria;
+    if(!feria){ toast('Elige una feria arriba (IT/PV/TW) antes de cargar la lista.'); return; }
     var lineas = raw.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l; });
     if(!lineas.length){ return; }
     var pend = lineas.length;
@@ -2356,6 +2387,14 @@ function wirePlaneacion(){
   if(selFeriaPlan) selFeriaPlan.onchange = function(){ STATE.planFiltro.feria = selFeriaPlan.value; render(); };
   var inpProvPlan = document.getElementById('fFiltroProveedorPlan');
   if(inpProvPlan) inpProvPlan.oninput = function(){ STATE.planFiltro.proveedor = inpProvPlan.value; render(); };
+  on('btnCorregirFeria', function(){
+    customConfirm('Esto revisa todos los expositores y, si el nombre empieza con [IT], [PV] o [TW] (con o sin línea después, ej. [TW-Denim]), le pone esa feria automáticamente. No borra ni cambia nada más. ¿Continuar?', function(){
+      corregirFeriaPorPrefijo(function(corregidos, total){
+        toast(corregidos>0? ('Corregidos '+corregidos+' de '+total+' expositores ✓') : 'Ningún expositor tenía prefijo [IT]/[PV]/[TW] en el nombre — revisa que la lista sí tenga esos prefijos.');
+        render();
+      });
+    });
+  });
   on('btnGenerarPlan', function(){
     var feriaSel = STATE.planFiltro.feria || '';
     var tituloFeria = feriaSel? (FERIA_LABEL[feriaSel]? feriaSel+' — '+FERIA_LABEL[feriaSel] : feriaSel) : 'todas las ferias';
