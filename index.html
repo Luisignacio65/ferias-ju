@@ -834,7 +834,7 @@ function extraerCamposComprobante(texto){
    CACHE_NAME en sw.js) permite confirmar en 2 segundos, mirando la pantalla
    de inicio, si el celular ya tiene lo último — sin tener que adivinar por
    los síntomas. Súbelo junto con CACHE_NAME en cada publicación. */
-var APP_VERSION = 'v19';
+var APP_VERSION = 'v20';
 
 /* ---------- Estado de la app ---------- */
 var STATE = {
@@ -2522,7 +2522,8 @@ function viewReservaForm(x){
   '<h2>'+(x._esNuevo? 'Nueva reserva' : 'Editar reserva')+'</h2>'+
   '<div class="card">'+
     '<label class="small">Viaje</label>'+
-    '<input id="fResViaje" list="listaViajesDossier" value="'+escapeHtml(x.viaje)+'" placeholder="Ej: París — sep 2026">'+
+    '<select id="fResViaje"><option value="'+escapeHtml(x.viaje)+'">'+escapeHtml(x.viaje||'(elige un viaje)')+'</option></select>'+
+    '<input id="fResViajeOtro" placeholder="Escribe el nombre del viaje nuevo" style="display:none;margin-top:6px">'+
     '<label class="small">Categoría</label>'+
     '<select id="fResCategoria">'+CATEGORIAS_RESERVA.map(function(c){return '<option '+(x.categoria===c?'selected':'')+'>'+c+'</option>';}).join('')+'</select>'+
     '<label class="small">Título</label>'+
@@ -2552,7 +2553,8 @@ function viewItinerarioForm(x){
   '<h2>'+(x._esNuevo? 'Nueva actividad de itinerario' : 'Editar actividad')+'</h2>'+
   '<div class="card">'+
     '<label class="small">Viaje</label>'+
-    '<input id="fItinViaje" list="listaViajesDossier" value="'+escapeHtml(x.viaje)+'" placeholder="Ej: París — sep 2026">'+
+    '<select id="fItinViaje"><option value="'+escapeHtml(x.viaje)+'">'+escapeHtml(x.viaje||'(elige un viaje)')+'</option></select>'+
+    '<input id="fItinViajeOtro" placeholder="Escribe el nombre del viaje nuevo" style="display:none;margin-top:6px">'+
     '<div class="grid2">'+
       '<div><label class="small">Fecha</label><input type="date" id="fItinFecha" value="'+escapeHtml(x.fecha)+'"></div>'+
       '<div><label class="small">Hora</label><input type="time" id="fItinHora" value="'+escapeHtml(x.hora)+'"></div>'+
@@ -2570,13 +2572,44 @@ function viewItinerarioForm(x){
   '</div>'+
   (x._esNuevo? '' : '<button class="danger" id="btnBorrarItinForm" style="width:100%;margin-top:10px">🗑️ Eliminar esta actividad</button>');
 }
+/* Antes el campo Viaje era un <input list="listaViajesDossier"> apuntando a
+   un <datalist> que solo existía en la pantalla principal de Dossier — al
+   abrir el formulario de Nueva reserva/Itinerario esa pantalla se reemplaza
+   entera y el datalist desaparece, así que la lista nunca aparecía (en
+   ningún dispositivo). Ahora es un <select> real, poblado aquí mismo con los
+   viajes que ya existen, más una opción "Otro" para escribir uno nuevo. */
+var VIAJE_OTRO_VALOR = '__OTRO_NUEVO__';
+function poblarSelectViaje(selectId, otroInputId, viajeActual){
+  dbGetAll('dossier', function(all){
+    var sel = document.getElementById(selectId);
+    var otro = document.getElementById(otroInputId);
+    if(!sel) return;
+    var viajes = dossierViajesDistintos(all);
+    if(viajeActual && viajes.indexOf(viajeActual)<0) viajes.push(viajeActual);
+    sel.innerHTML = viajes.map(function(v){
+      return '<option value="'+escapeHtml(v)+'" '+(v===viajeActual?'selected':'')+'>'+escapeHtml(v)+'</option>';
+    }).join('') + '<option value="'+VIAJE_OTRO_VALOR+'">➕ Otro (escribir viaje nuevo)</option>';
+    sel.onchange = function(){
+      if(!otro) return;
+      if(sel.value===VIAJE_OTRO_VALOR){ otro.style.display=''; otro.focus(); }
+      else { otro.style.display='none'; otro.value=''; }
+    };
+  });
+}
 function renderDossier(app){
-  if(STATE.dossierForm){ app.innerHTML = viewReservaForm(STATE.dossierForm); return; }
-  if(STATE.dossierItinForm){ app.innerHTML = viewItinerarioForm(STATE.dossierItinForm); return; }
+  if(STATE.dossierForm){
+    app.innerHTML = viewReservaForm(STATE.dossierForm);
+    poblarSelectViaje('fResViaje','fResViajeOtro', STATE.dossierForm.viaje);
+    return;
+  }
+  if(STATE.dossierItinForm){
+    app.innerHTML = viewItinerarioForm(STATE.dossierItinForm);
+    poblarSelectViaje('fItinViaje','fItinViajeOtro', STATE.dossierItinForm.viaje);
+    return;
+  }
   app.innerHTML = ''+
     '<h2>Dossier de Viaje & Logística</h2>'+
     '<p class="muted">Reservas organizadas por categoría (vuelos, hoteles, trenes, restaurantes, escarapelas...), en orden cronológico — accesible sin señal, para dejar de ser "el mostrador de información" del grupo.</p>'+
-    '<datalist id="listaViajesDossier"></datalist>'+
     '<div class="grid2">'+
       '<button class="teal" id="btnNuevaReserva">📄 + Nueva reserva</button>'+
       '<button id="btnNuevoItin">🗓️ + Itinerario</button>'+
@@ -2584,9 +2617,6 @@ function renderDossier(app){
     '<div id="dossierBody"><p class="muted">Cargando…</p></div>';
 
   dbGetAll('dossier', function(all){
-    var datalist = document.getElementById('listaViajesDossier');
-    if(datalist) datalist.innerHTML = dossierViajesDistintos(all).map(function(v){return '<option value="'+escapeHtml(v)+'">';}).join('');
-
     var body = document.getElementById('dossierBody');
     if(!body) return;
     if(!all.length){ body.innerHTML = '<div class="card"><p class="muted">Sin viajes organizados todavía — crea tu primera reserva o actividad de itinerario.</p></div>'; return; }
@@ -2682,6 +2712,12 @@ function CATEGORIA_ICONO(cat){
    si algo cambia después de generarlo, se invalida para que Luis no comparta
    por error un resumen desactualizado — vuelve a aparecer el botón "Generar". */
 function invalidarResumenDossier(){ STATE.dossierResumenViaje=''; STATE.dossierResumenTexto=''; }
+function leerViajeSeleccionado(selectId, otroInputId){
+  var sel = document.getElementById(selectId);
+  if(!sel) return '';
+  if(sel.value===VIAJE_OTRO_VALOR) return (val(otroInputId)||'').trim();
+  return sel.value;
+}
 function wireDossier(){
   if(STATE.dossierForm){
     var x = STATE.dossierForm;
@@ -2691,7 +2727,7 @@ function wireDossier(){
     };
     on('btnCancelarRes', function(){ STATE.dossierForm=null; render(); });
     on('btnGuardarRes', function(){
-      x.viaje = val('fResViaje').trim(); x.categoria = val('fResCategoria'); x.titulo = val('fResTitulo');
+      x.viaje = leerViajeSeleccionado('fResViaje','fResViajeOtro'); x.categoria = val('fResCategoria'); x.titulo = val('fResTitulo');
       x.fecha = val('fResFecha'); x.hora = val('fResHora'); x.lugar = val('fResLugar');
       x.confirmacion = val('fResConfirmacion'); x.notas = val('fResNotas');
       if(!x.viaje || !x.titulo){ toast('Completa al menos el viaje y el título.'); return; }
@@ -2712,7 +2748,7 @@ function wireDossier(){
     var it = STATE.dossierItinForm;
     on('btnCancelarItin', function(){ STATE.dossierItinForm=null; render(); });
     on('btnGuardarItin', function(){
-      it.viaje = val('fItinViaje').trim(); it.fecha = val('fItinFecha'); it.hora = val('fItinHora');
+      it.viaje = leerViajeSeleccionado('fItinViaje','fItinViajeOtro'); it.fecha = val('fItinFecha'); it.hora = val('fItinHora');
       it.actividad = val('fItinTipo'); it.descripcion = val('fItinDescripcion'); it.lugar = val('fItinLugar');
       if(!it.viaje || !it.descripcion){ toast('Completa al menos el viaje y la descripción.'); return; }
       it.fecha_edicion = Date.now(); delete it._esNuevo;
