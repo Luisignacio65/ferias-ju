@@ -2205,10 +2205,12 @@ function feriasDistintasExpositor(all){
 function renderPlaneacion(app){
   if(STATE.planExpForm){ app.innerHTML = viewExpositorForm(STATE.planExpForm); return; }
   var feriaActiva = feriaActivaTexto();
-  // planFiltro.feria===null la primera vez que se abre => usa la feria activa
-  // del encabezado; después respeta lo que Luis haya elegido en el filtro
-  // (incluida "Todas", que se guarda como '').
-  if(STATE.planFiltro.feria===null) STATE.planFiltro.feria = feriaActiva;
+  // planFiltro.feria===null la primera vez que se abre => arranca en "Todas"
+  // (''). Antes arrancaba con el texto combinado del encabezado, pero desde
+  // que cada expositor lleva su propio código IT/PV/TW (2026-08-17) ese
+  // combinado ya no coincide con ningún expositor y el filtro parecía
+  // "vacío" al abrir por primera vez. Después respeta lo que Luis elija.
+  if(STATE.planFiltro.feria===null) STATE.planFiltro.feria = '';
   app.innerHTML = ''+
     '<h2>Planeación</h2>'+
     '<p class="muted">Feria activa: <strong>'+escapeHtml(feriaActiva)+'</strong> — listado de expositores y plan de visita. Los objetivos por línea están en la pestaña 🎯 Objetivos.</p>'+
@@ -2339,9 +2341,10 @@ function wirePlaneacion(){
   var inpProvPlan = document.getElementById('fFiltroProveedorPlan');
   if(inpProvPlan) inpProvPlan.oninput = function(){ STATE.planFiltro.proveedor = inpProvPlan.value; render(); };
   on('btnGenerarPlan', function(){
-    var feria = STATE.planFiltro.feria || feriaActivaTexto();
+    var feriaSel = STATE.planFiltro.feria || '';
+    var tituloFeria = feriaSel? (FERIA_LABEL[feriaSel]? feriaSel+' — '+FERIA_LABEL[feriaSel] : feriaSel) : 'todas las ferias';
     dbGetAll('planeacion', function(all){
-      var exps = all.filter(function(x){ return x.tipo==='expositor' && x.feria===feria; });
+      var exps = all.filter(function(x){ return x.tipo==='expositor' && (!feriaSel || x.feria===feriaSel); });
       var body = document.getElementById('planVisitaBody');
       if(!body) return;
       if(!exps.length){ body.innerHTML = '<div class="card"><p class="muted">Sin expositores cargados todavía.</p></div>'; return; }
@@ -2355,7 +2358,7 @@ function wirePlaneacion(){
           '<td>'+(x.prioridad==='infaltable'? '<span class="pill pendiente">Infaltable</span>' : '<span class="muted" style="font-size:11.5px">Secundario</span>')+'</td>'+
           '<td>'+(x.coleccion_nueva? '🆕' : '')+'</td></tr>';
       }).join('');
-      body.innerHTML = '<div class="card"><h3>Plan de visita — '+escapeHtml(feria)+'</h3>'+
+      body.innerHTML = '<div class="card"><h3>Plan de visita — '+escapeHtml(tituloFeria)+'</h3>'+
         '<p class="muted">Orden sugerido: infaltables primero, luego por Hall y Stand.</p>'+
         '<table><tr><th>#</th><th>Expositor</th><th>Hall</th><th>Stand</th><th>Prioridad</th><th>Nueva</th></tr>'+rows+'</table>'+
       '</div>';
@@ -2364,9 +2367,9 @@ function wirePlaneacion(){
   on('btnExportExpCsv', exportarExpositoresCSV);
 }
 function exportarExpositoresCSV(){
-  var feria = STATE.planFiltro.feria || feriaActivaTexto();
+  var feriaSel = STATE.planFiltro.feria || '';
   dbGetAll('planeacion', function(all){
-    var exps = all.filter(function(x){ return x.tipo==='expositor' && x.feria===feria; });
+    var exps = all.filter(function(x){ return x.tipo==='expositor' && (!feriaSel || x.feria===feriaSel); });
     exps.sort(function(a,b){
       var h = compareAlfaNum(a.hall,b.hall); if(h!==0) return h;
       return compareAlfaNum(a.stand,b.stand);
@@ -2385,7 +2388,7 @@ function exportarExpositoresCSV(){
     var blob = new Blob(["﻿"+csv], {type:'text/csv;charset=utf-8;'});
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'Expositores_'+slug(feria)+'_'+(new Date().toISOString().slice(0,10))+'.csv';
+    a.download = 'Expositores_'+slug(feriaSel||'todas')+'_'+(new Date().toISOString().slice(0,10))+'.csv';
     document.body.appendChild(a); a.click(); a.remove();
     toast("Excel (CSV) descargado.");
   });
