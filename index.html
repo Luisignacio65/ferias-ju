@@ -1958,7 +1958,7 @@ function armarTextoAnalisisReporte(encs, vis, porLinea, actuales, nuevos, rankin
 }
 function renderReporte(app){
   app.innerHTML = '<h2>Reporte a Gerencia</h2><p class="muted">Foto del momento — se genera con lo capturado hasta ahora.</p>'+
-    '<div class="grid2"><button id="btnPdf">📄 Exportar PDF</button><button class="sec" id="btnJson">⬇️ Exportar JSON</button></div>'+
+    '<div class="grid2"><button id="btnPdf">📄 Exportar PDF</button><button class="sec" id="btnJson">⬇️ Exportar JSON (sin fotos)</button></div>'+
     '<div id="repBody"><p class="muted">Cargando…</p></div>';
   dbGetAll('encuentros', function(encs){
     dbGetAll('visitas', function(vis){
@@ -3030,41 +3030,109 @@ function wireRegistros(){
 }
 function wireReporte(){
   on('btnPdf', function(){ exportarPDF(); });
-  on('btnJson', function(){ exportarJSON(); });
+  on('btnJson', function(){ exportarJSONLigero(); });
 }
 
 /* ---------- Exportar / respaldo ---------- */
-/* Construye el texto de respaldo (todas las tablas) una sola vez —
-   lo usan tanto la descarga de archivo (exportarJSON) como copiar al
-   portapapeles (copiarRespaldoTexto), para no repetir la lógica. */
-function construirRespaldoTexto(cb){
-  dbGetAll('encuentros', function(encs){
-    dbGetAll('visitas', function(vis){
-      dbGetAll('gastos', function(gas){
-        dbGetAll('planeacion', function(plan){
-          dbGetAll('dossier', function(doss){
-            var data = {version:4, exportado:Date.now(), encuentros:encs, visitas:vis, gastos:gas, planeacion:plan, dossier:doss};
-            cb(JSON.stringify(data));
-          });
-        });
-      });
+/* Tablas que respaldamos. OJO 2026-09-13: 'negociacion' (Sourcing Intelligence
+   Platform, 43 referencias) faltaba aquí — el respaldo/restaurar nunca la
+   tocaba, así que cualquier edición a esa tabla se habría perdido en una
+   restauración o cambio de dispositivo. Se agrega ahora. */
+var TABLAS_RESPALDO = ['encuentros','visitas','gastos','planeacion','dossier','negociacion'];
+/* Campos con foto (base64) por tabla — se usan para armar el respaldo
+   "ligero" (sin fotos) y para el respaldo "con fotos" tabla por tabla. */
+var CAMPOS_FOTO = {
+  encuentros: ['telas','fotos_contexto'],
+  visitas: ['foto_aviso','fotos_contexto','prendas'],
+  gastos: ['foto'],
+  dossier: ['documento'],
+  planeacion: [],
+  negociacion: []
+};
+/* Devuelve una copia del registro con las fotos quitadas (null), sin tocar
+   el original que sigue en IndexedDB/memoria. Soporta tanto campo directo
+   (ej. gasto.foto) como arreglos de objetos con .foto (ej. telas[].foto). */
+function despojarFotos(registro, campos){
+  var r = JSON.parse(JSON.stringify(registro));
+  (campos||[]).forEach(function(campo){
+    var v = r[campo];
+    if(Array.isArray(v)){
+      v.forEach(function(item){ if(item && typeof item==='object' && 'foto' in item) item.foto=null; });
+    } else if(campo in r){
+      r[campo]=null;
+    }
+  });
+  return r;
+}
+/* Construye el texto de respaldo de TODAS las tablas de una sola vez.
+   soloTexto=true quita las fotos primero (backup liviano, nunca debería
+   fallar por memoria). soloTexto=false arma el respaldo completo (con
+   fotos) — pesado si hay muchas fotos acumuladas; úsalo con cuidado o,
+   mejor, usa exportarConFotosPorTabla() que lo hace tabla por tabla. */
+function construirRespaldoTexto(cb, soloTexto){
+  var tareas = TABLAS_RESPALDO.map(function(t){ return t; });
+  var resultado = {};
+  var pend = tareas.length;
+  tareas.forEach(function(tabla){
+    dbGetAll(tabla, function(regs){
+      resultado[tabla] = soloTexto
+        ? regs.map(function(r){ return despojarFotos(r, CAMPOS_FOTO[tabla]); })
+        : regs;
+      pend--;
+      if(pend===0){
+        var data = Object.assign({version:5, exportado:Date.now(), sinFotos:!!soloTexto}, resultado);
+        cb(JSON.stringify(data));
+      }
     });
   });
 }
-function exportarJSON(){
+function descargarBlob(texto, nombre){
+  var blob = new Blob([texto], {type:'application/json'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+}
+/* Respaldo LIGERO (sin fotos) — es el que debe usarse siempre que solo
+   necesites recuperar los datos de negocio (notas, gastos, negociación,
+   objetivos). Pesa KB, no MB: prácticamente no puede saturar memoria. */
+function exportarJSONLigero(){
   construirRespaldoTexto(function(texto){
-    var blob = new Blob([texto], {type:'application/json'});
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'ferias_respaldo_'+(new Date().toISOString().slice(0,10))+'.json';
-    document.body.appendChild(a); a.click(); a.remove();
-    toast("Respaldo descargado.");
-  });
+    descargarBlob(texto, 'ferias_respaldo_texto_'+(new Date().toISOString().slice(0,10))+'.json');
+    toast("Respaldo (sin fotos) descargado.");
+  }, true);
+}
+/* Respaldo COMPLETO con fotos — una tabla a la vez, cada una en su propio
+   archivo y con una pausa entre descargas para que el navegador libere la
+   memoria de la tabla anterior antes de armar la siguiente. Así el pico de
+   memoria queda acotado al tamaño de la tabla más pesada (normalmente
+   'encuentros' o 'visitas'), no a la suma de las 6 tablas juntas — que es
+   lo que hacía caerse Safari en el iPhone. */
+function exportarConFotosPorTabla(){
+  var tablas = TABLAS_RESPALDO.slice();
+  var fecha = new Date().toISOString().slice(0,10);
+  toast("Exportando tabla por tabla ("+tablas.length+")…", 3000);
+  function siguiente(i){
+    if(i>=tablas.length){ toast("Respaldo con fotos completo (revisa tus descargas)."); return; }
+    var tabla = tablas[i];
+    dbGetAll(tabla, function(regs){
+      if(!regs.length){ setTimeout(function(){ siguiente(i+1); }, 30); return; }
+      var data = {version:5, exportado:Date.now(), tabla:tabla, registros:regs};
+      descargarBlob(JSON.stringify(data), 'ferias_fotos_'+tabla+'_'+fecha+'.json');
+      data = null;
+      setTimeout(function(){ siguiente(i+1); }, 700);
+    });
+  }
+  siguiente(0);
 }
 /* Copiar al portapapeles — alternativa a la descarga de archivo, para
    visores (como Documents/Readdle con "Block external links" activo)
    que bloquean la descarga por blob. Usa la misma técnica que ya
-   funciona en el Foco Semanal: textarea temporal + execCommand('copy'). */
+   funciona en el Foco Semanal: textarea temporal + execCommand('copy').
+   Siempre usa la versión SIN fotos: meter un JSON de varios MB dentro de
+   un <textarea> del DOM es tan o más pesado que el export completo, y
+   aquí no hay forma de partirlo por tabla (es un solo texto para pegar). */
 function copiarRespaldoTexto(){
   construirRespaldoTexto(function(texto){
     var ta = document.createElement('textarea');
@@ -3075,10 +3143,10 @@ function copiarRespaldoTexto(){
     var ok=false;
     try{ ok = document.execCommand('copy'); }catch(e){}
     document.body.removeChild(ta);
-    if(ok) toast("Respaldo copiado — pégalo en un WhatsApp o correo a ti mismo.", 3500);
+    if(ok) toast("Respaldo (sin fotos) copiado — pégalo en un WhatsApp o correo a ti mismo.", 3500);
     else toast("No se pudo copiar automáticamente. Mantén presionado el cuadro de abajo y copia a mano.", 4000);
     mostrarTextoRespaldoManual(texto, !ok);
-  });
+  }, true);
 }
 /* Deja el texto visible y seleccionable como respaldo del respaldo —
    si el copiado automático falla, Luis lo selecciona a mano (toque
@@ -3090,15 +3158,24 @@ function mostrarTextoRespaldoManual(texto, forzarVisible){
   box.querySelector('textarea').value = texto;
   if(forzarVisible) box.querySelector('textarea').focus();
 }
+/* Restaura tanto el formato completo ({encuentros:[],visitas:[],...}) como
+   el formato de una sola tabla ({tabla:'encuentros', registros:[...]}) que
+   genera exportarConFotosPorTabla(). Tolera archivos parciales: si falta
+   una tabla, simplemente no toca esa tabla. */
 function restaurarDatos(jsonText, onDone){
   try{
     var data = JSON.parse(jsonText);
-    (data.encuentros||[]).forEach(function(x){ dbPut('encuentros', x); });
-    (data.visitas||[]).forEach(function(x){ dbPut('visitas', x); });
-    (data.gastos||[]).forEach(function(x){ dbPut('gastos', x); });
-    (data.planeacion||[]).forEach(function(x){ dbPut('planeacion', x); });
-    (data.dossier||[]).forEach(function(x){ dbPut('dossier', x); });
-    toast("Respaldo importado ✓"); onDone&&onDone(true); setView('home');
+    var total = 0;
+    if(data && data.tabla && Array.isArray(data.registros)){
+      data.registros.forEach(function(x){ dbPut(data.tabla, x); });
+      total = data.registros.length;
+    } else {
+      TABLAS_RESPALDO.forEach(function(tabla){
+        (data[tabla]||[]).forEach(function(x){ dbPut(tabla, x); });
+        total += (data[tabla]||[]).length;
+      });
+    }
+    toast("Respaldo importado ✓ ("+total+" registros)"); onDone&&onDone(true); setView('home');
   }catch(err){ toast("Ese texto/archivo no es un respaldo válido."); onDone&&onDone(false); }
 }
 function importarJSON(file){
@@ -3109,21 +3186,23 @@ function importarJSON(file){
 function respaldoUI(){
   var app=document.getElementById('app');
   app.innerHTML = '<h2>Respaldo</h2>'+
-    '<div class="card"><p>Descarga una copia de todo lo capturado (por si se borra el navegador o quieres pasarlo a tu computador).</p>'+
-      '<button id="expJ">⬇️ Exportar JSON</button>'+
-      '<button class="sec" id="copJ" style="margin-top:8px">📋 Copiar respaldo (si la descarga no funciona)</button>'+
+    '<div class="card"><p>Descarga una copia de todo lo capturado (por si se borra el navegador o quieres pasarlo a tu computador). Usa primero la opción sin fotos — es la que nunca falla.</p>'+
+      '<button id="expJ">⬇️ Exportar respaldo (texto, sin fotos)</button>'+
+      '<button class="sec" id="expFotos" style="margin-top:8px">🖼️ Exportar con fotos (tabla por tabla)</button>'+
+      '<button class="sec" id="copJ" style="margin-top:8px">📋 Copiar respaldo de texto (si la descarga no funciona)</button>'+
     '</div>'+
     '<div class="card hidden" id="respaldoTextoBox">'+
       '<label class="small">Texto del respaldo — mantén presionado, "Seleccionar todo" y "Copiar" si el botón de arriba no copió solo</label>'+
       '<textarea readonly style="min-height:110px;font-size:10.5px" onclick="this.select()"></textarea>'+
     '</div>'+
-    '<div class="card"><p>Restaurar un respaldo anterior (archivo):</p><input type="file" accept="application/json" id="impJ"></div>'+
+    '<div class="card"><p>Restaurar un respaldo anterior (archivo — sirve tanto el de texto como cada archivo de "con fotos"):</p><input type="file" accept="application/json" id="impJ"></div>'+
     '<div class="card"><p>O restaurar pegando el texto de un respaldo (ej. el que copiaste desde el otro dispositivo):</p>'+
       '<textarea id="pegarRespaldo" placeholder="Pega aquí el texto del respaldo…" style="min-height:90px;font-size:11px"></textarea>'+
       '<button id="restPegado">Restaurar desde texto pegado</button>'+
     '</div>'+
     '<button class="sec" id="volverHome">← Volver a Inicio</button>';
-  document.getElementById('expJ').onclick = exportarJSON;
+  document.getElementById('expJ').onclick = exportarJSONLigero;
+  document.getElementById('expFotos').onclick = exportarConFotosPorTabla;
   document.getElementById('copJ').onclick = copiarRespaldoTexto;
   document.getElementById('impJ').onchange = function(e){ if(e.target.files[0]) importarJSON(e.target.files[0]); };
   document.getElementById('restPegado').onclick = function(){
