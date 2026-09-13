@@ -3126,6 +3126,23 @@ function exportarConFotosPorTabla(){
   }
   siguiente(0);
 }
+/* OJO 2026-09-13: en iPhone/Safari, la pantalla nativa de "Guardar en
+   Archivos" (o el diálogo "Replace Existing Items?") suspende el JS de la
+   página mientras está abierta — el setTimeout que debía seguir con la
+   SIGUIENTE tabla en exportarConFotosPorTabla() nunca llega a dispararse,
+   así que el encadenado automático se queda pegado siempre en la primera
+   tabla ("encuentros"). Se agrega esta versión manual, tabla por tabla,
+   como respaldo confiable: un botón por tabla, un toque = un archivo,
+   sin depender de que ningún timer sobreviva a la pantalla nativa. */
+function exportarUnaTablaConFotos(tabla){
+  var fecha = new Date().toISOString().slice(0,10);
+  dbGetAll(tabla, function(regs){
+    if(!regs.length){ toast('"'+tabla+'" está vacía — no hay nada que exportar ahí.'); return; }
+    var data = {version:5, exportado:Date.now(), tabla:tabla, registros:regs};
+    descargarBlob(JSON.stringify(data), 'ferias_fotos_'+tabla+'_'+fecha+'.json');
+    toast('Exportando '+tabla+' ('+regs.length+' registros)…');
+  });
+}
 /* Copiar al portapapeles — alternativa a la descarga de archivo, para
    visores (como Documents/Readdle con "Block external links" activo)
    que bloquean la descarga por blob. Usa la misma técnica que ya
@@ -3183,13 +3200,22 @@ function importarJSON(file){
   reader.onload = function(e){ restaurarDatos(e.target.result); };
   reader.readAsText(file);
 }
+var ETIQUETAS_TABLA = {
+  encuentros:'Encuentros', visitas:'Visitas', gastos:'Gastos',
+  planeacion:'Planeación', dossier:'Dossier', negociacion:'Negociación'
+};
 function respaldoUI(){
   var app=document.getElementById('app');
+  var botonesTabla = TABLAS_RESPALDO.map(function(t){
+    return '<button class="sec" data-tabla-fotos="'+t+'" style="margin-top:6px">🖼️ '+ETIQUETAS_TABLA[t]+' (con fotos)</button>';
+  }).join('');
   app.innerHTML = '<h2>Respaldo</h2>'+
     '<div class="card"><p>Descarga una copia de todo lo capturado (por si se borra el navegador o quieres pasarlo a tu computador). Usa primero la opción sin fotos — es la que nunca falla.</p>'+
       '<button id="expJ">⬇️ Exportar respaldo (texto, sin fotos)</button>'+
-      '<button class="sec" id="expFotos" style="margin-top:8px">🖼️ Exportar con fotos (tabla por tabla)</button>'+
       '<button class="sec" id="copJ" style="margin-top:8px">📋 Copiar respaldo de texto (si la descarga no funciona)</button>'+
+    '</div>'+
+    '<div class="card"><p>Con fotos — toca tabla por tabla, una por una (en el iPhone la pantalla de "Guardar" interrumpe el encadenado automático, así que hazlo así de seguro):</p>'+
+      botonesTabla+
     '</div>'+
     '<div class="card hidden" id="respaldoTextoBox">'+
       '<label class="small">Texto del respaldo — mantén presionado, "Seleccionar todo" y "Copiar" si el botón de arriba no copió solo</label>'+
@@ -3202,7 +3228,9 @@ function respaldoUI(){
     '</div>'+
     '<button class="sec" id="volverHome">← Volver a Inicio</button>';
   document.getElementById('expJ').onclick = exportarJSONLigero;
-  document.getElementById('expFotos').onclick = exportarConFotosPorTabla;
+  document.querySelectorAll('[data-tabla-fotos]').forEach(function(btn){
+    btn.onclick = function(){ exportarUnaTablaConFotos(btn.getAttribute('data-tabla-fotos')); };
+  });
   document.getElementById('copJ').onclick = copiarRespaldoTexto;
   document.getElementById('impJ').onchange = function(e){ if(e.target.files[0]) importarJSON(e.target.files[0]); };
   document.getElementById('restPegado').onclick = function(){
