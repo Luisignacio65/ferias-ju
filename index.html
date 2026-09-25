@@ -834,7 +834,7 @@ function extraerCamposComprobante(texto){
    CACHE_NAME en sw.js) permite confirmar en 2 segundos, mirando la pantalla
    de inicio, si el celular ya tiene lo último — sin tener que adivinar por
    los síntomas. Súbelo junto con CACHE_NAME en cada publicación. */
-var APP_VERSION = 'v24';
+var APP_VERSION = 'v25';
 
 /* ---------- Estado de la app ---------- */
 var STATE = {
@@ -1324,8 +1324,8 @@ function generarCorreoTexto(e){
    Las fotos se reducen a máx. 1000 px para que el correo no pese demasiado. */
 function fotosDeEncuentro(e){
   var out=[];
-  (e.telas||[]).forEach(function(t,i){ if(t && t.foto) out.push({id:'t_'+(t.id||i), src:t.foto, cap:(trEN(e,'tela.'+t.id,t.ref)||'Fabric').trim()}); });
-  (e.fotos_contexto||[]).forEach(function(f,i){ if(f && f.foto) out.push({id:'c_'+(f.id||i), src:f.foto, cap:(f.etiqueta||'').trim()}); });
+  telasNumeradas(e).forEach(function(x){ var t=x.t; if(t.foto) out.push({id:'t_'+t.id, src:t.foto, cap:'Fabric '+x.n+' — '+(trEN(e,'tela.'+t.id,t.ref)||'Fabric').trim()}); });
+  (e.fotos_contexto||[]).forEach(function(f,i){ if(f && f.foto) out.push({id:'c_'+(f.id||i), src:f.foto, cap:(f.etiqueta||'Stand').trim()}); });
   return out;
 }
 function reducirFoto(src, maxLado, cb){
@@ -1366,6 +1366,56 @@ function correoHtmlConFotos(cuerpo, fotos){
   }
   return html+'</div>';
 }
+/* Ficha completa del encuentro en inglés (v25): todo lo capturado, para que Luis
+   filtre y ajuste antes de enviar. Las telas van numeradas igual que los pies de foto. */
+var RESULTADO_EN = {'Pendiente':'Pending','Resuelto':'Resolved','Respuesta poco clara':'Unclear answer'};
+function telasNumeradas(e){
+  var n=0, out=[];
+  (e.telas||[]).forEach(function(t){ if(t && (t.ref || t.foto || t.precio)){ n++; out.push({n:n, t:t}); } });
+  return out;
+}
+function generarFichaCompleta(e){
+  var info = EMAIL_PROVEEDORES[e.proveedor] || {email:'', contacto:''};
+  var saludo = info.contacto ? info.contacto : 'Sirs';
+  var L = [];
+  L.push('Dear '+saludo+',');
+  L.push('');
+  L.push('Tks for the meeting at the fair. Please find below a summary of our meeting:');
+  var temas=[];
+  ['programa','comisiones','reclamos','desarrollos'].forEach(function(k){
+    var d=(e.temas||{})[k]||{};
+    var res=trEN(e,'temas.'+k+'.resumen',d.resumen), com=trEN(e,'temas.'+k+'.comentario',d.comentario);
+    if(com && /^Sin pendientes de comisi/.test(d.resumen||'')) res='';  // el resumen automático no debe contradecir el comentario
+    if(!res && !com && !d.aplica) return;
+    var txt=[res,com].filter(Boolean).join(' — ');
+    var st=d.resultado? ' [Status: '+(RESULTADO_EN[d.resultado]||d.resultado)+']' : '';
+    temas.push('- '+TEMA_LABELS[k]+': '+(txt||'(no comments)')+st);
+  });
+  if(temas.length){ L.push(''); L.push('TOPICS DISCUSSED'); L=L.concat(temas); }
+  var tn=telasNumeradas(e);
+  if(tn.length){
+    L.push(''); L.push('FABRICS ('+tn.length+')');
+    tn.forEach(function(x){
+      var t=x.t, det=[];
+      if(t.composicion) det.push('Composition: '+t.composicion.trim());
+      if(t.ancho) det.push('Width: '+t.ancho.trim());
+      if(t.gsm) det.push('Weight: '+t.gsm.trim());
+      if(t.precio) det.push('Price: USD '+String(t.precio).trim());
+      if(t.mostrario==='Entregado') det.push('Sample book: received');
+      else if(t.mostrario==='Solicitado / no entregado') det.push('Sample book: requested, pending');
+      L.push(x.n+'. '+((trEN(e,'tela.'+t.id,t.ref)||'Fabric').trim())+(det.length? ' — '+det.join(' · ') : ''));
+    });
+  }
+  if(e.listado_refs_texto){ L.push(''); L.push('REFERENCES LIST'); L.push(e.listado_refs_texto.trim()); }
+  if(e.pedido_nuevo){ L.push(''); L.push('ORDER DISCUSSED'); L.push(trEN(e,'pedido_nuevo',e.pedido_nuevo).trim()); }
+  if(e.otros_pendientes){ L.push(''); L.push('NEXT STEPS'); L.push(trEN(e,'otros_pendientes',e.otros_pendientes).trim()); }
+  var notas=[trEN(e,'hallazgos_stand',e.hallazgos_stand), trEN(e,'novedades_proveedor',e.novedades_proveedor)].filter(Boolean).map(function(x){return x.trim();});
+  if(notas.length){ L.push(''); L.push('NOTES'); L=L.concat(notas); }
+  if(fotosDeEncuentro(e).length){ L.push(''); L.push('Pls see below the photos taken at your stand.'); }
+  L.push(''); L.push('Pls cfrm asap.'); L.push(''); L.push('Best rgds,'); L.push('Luis');
+  return { subject:'Meeting summary - '+(e.proveedor||'').trim()+' (trade fair)', body:L.join('\n'), email:info.email };
+}
+function textoCorreoSegunModo(e){ return (STATE.correoModo==='pendientes')? generarCorreoTexto(e) : generarFichaCompleta(e); }
 function pendientesDe(e){
   var items = [];
   ['programa','comisiones','reclamos','desarrollos'].forEach(function(k){
@@ -1456,8 +1506,13 @@ function renderSeguimiento(app){
           '<h3>Correo de seguimiento — '+escapeHtml(e.proveedor)+'</h3>'+
           '<p class="muted" style="background:var(--bg);border-radius:8px;padding:8px 10px;font-weight:600">⚠️ Este correo va al proveedor — revisa que el cuerpo quede en inglés antes de copiar.</p>'+
           (STATE.correoEmail? '<p class="muted">Para: '+escapeHtml(STATE.correoEmail)+'</p>' : '<p class="muted">Sin email registrado para este proveedor — complétalo a mano.</p>')+
+          '<div style="display:flex;gap:8px;margin:6px 0 4px">'+
+            '<button id="btnModoFicha" class="'+(STATE.correoModo==='pendientes'?'ghost':'')+'" style="flex:1">📄 Ficha completa</button>'+
+            '<button id="btnModoPend" class="'+(STATE.correoModo==='pendientes'?'':'ghost')+'" style="flex:1">📌 Solo pendientes</button>'+
+          '</div>'+
+          '<p class="muted" style="font-size:11px;margin:0 0 8px">Cambiar de opción vuelve a armar el texto (se pierden los cambios hechos a mano).</p>'+
           '<label class="small">Asunto</label><input id="fCorreoAsunto" value="'+escapeHtml(STATE.correoAsunto)+'">'+
-          '<label class="small">Cuerpo</label><textarea id="fCorreoCuerpo" style="min-height:180px">'+escapeHtml(STATE.correoCuerpo)+'</textarea>'+
+          '<label class="small">Cuerpo</label><textarea id="fCorreoCuerpo" style="min-height:320px">'+escapeHtml(STATE.correoCuerpo)+'</textarea>'+
           '<div class="grid2">'+
             '<button id="btnCopiarCorreo">📋 Copiar</button>'+
             '<a class="btn" style="display:block;text-align:center;text-decoration:none" id="btnAbrirCorreo" href="#">✉️ Abrir en tu correo</a>'+
@@ -1490,6 +1545,9 @@ function renderSeguimiento(app){
           navigator.clipboard.writeText(texto).then(function(){ toast('Correo copiado ✓'); }).catch(fallback);
         } else fallback();
       };
+      function cambiarModo(m){ STATE.correoModo=m; var d=textoCorreoSegunModo(e); STATE.correoAsunto=d.subject; STATE.correoCuerpo=d.body; renderSeguimiento(app); }
+      var bMF=document.getElementById('btnModoFicha'); if(bMF) bMF.onclick=function(){ cambiarModo('ficha'); };
+      var bMP=document.getElementById('btnModoPend'); if(bMP) bMP.onclick=function(){ cambiarModo('pendientes'); };
       wireFotosCorreo(e, app);
       return;
     }
@@ -3760,7 +3818,7 @@ document.getElementById('app').addEventListener('click', function(ev){
     dbGetAll('encuentros', function(all){
       var e = all.find(function(x){ return String(x.id)===String(idc); });
       if(!e) return;
-      var d = generarCorreoTexto(e);
+      var d = textoCorreoSegunModo(e);
       STATE.correoId = e.id; STATE.correoAsunto = d.subject; STATE.correoCuerpo = d.body; STATE.correoEmail = d.email; STATE.correoSel = null;
       render();
     });
