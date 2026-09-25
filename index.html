@@ -834,7 +834,7 @@ function extraerCamposComprobante(texto){
    CACHE_NAME en sw.js) permite confirmar en 2 segundos, mirando la pantalla
    de inicio, si el celular ya tiene lo último — sin tener que adivinar por
    los síntomas. Súbelo junto con CACHE_NAME en cada publicación. */
-var APP_VERSION = 'v23';
+var APP_VERSION = 'v24';
 
 /* ---------- Estado de la app ---------- */
 var STATE = {
@@ -1310,6 +1310,7 @@ function generarCorreoTexto(e){
   if(e.otros_pendientes) pend.push(trEN(e,'otros_pendientes',e.otros_pendientes));
   var info = EMAIL_PROVEEDORES[e.proveedor] || {email:'', contacto:''};
   var saludo = info.contacto ? info.contacto : 'Sirs';
+  if(!pend.length) pend.push('');
   var body = 'Dear '+saludo+',\n\n'+
     'Tks for the meeting at the fair. Following up on a few points from our conversation:\n\n'+
     pend.map(function(p){return '- '+p;}).join('\n')+
@@ -1525,7 +1526,20 @@ function renderSeguimiento(app){
           (e.onboarding.alta_fecha? '<p class="muted" style="font-size:11px">Actualizado '+fmtFecha(e.onboarding.alta_fecha)+'</p>' : '')+
         '</div>';
       }).join('') : '<p class="muted">Sin proveedores nuevos con QR de alta entregado.</p>');
-    el.innerHTML = pendHtml + oeaHtml;
+    var todos = all.slice().sort(function(a,b){return (a.proveedor||'').trim().localeCompare((b.proveedor||'').trim());});
+    var selHtml = '<div class="card" style="border-left:4px solid var(--accent,#14304f)">'+
+      '<strong>✉️ Correo a cualquier proveedor</strong>'+
+      '<p class="muted" style="font-size:12px;margin:4px 0 8px">Texto en inglés + fotos del encuentro. Antes de enviar editas el texto y escoges las fotos.</p>'+
+      '<select id="selCorreoProv"><option value="">— Escoge el proveedor —</option>'+
+        todos.map(function(e){ var nf=fotosDeEncuentro(e).length; return '<option value="'+escapeHtml(String(e.id))+'">'+escapeHtml((e.proveedor||'(sin nombre)').trim())+' · '+nf+' foto'+(nf===1?'':'s')+'</option>'; }).join('')+
+      '</select>'+
+      '<button id="btnCorreoProv" style="margin-top:8px" disabled>✉️ Generar correo</button>'+
+    '</div><h3 style="margin-top:18px">Con pendientes</h3>';
+    el.innerHTML = selHtml + pendHtml + oeaHtml;
+    var selP = document.getElementById('selCorreoProv'), btnP = document.getElementById('btnCorreoProv');
+    if(selP && btnP){
+      selP.onchange = function(){ if(selP.value){ btnP.setAttribute('data-correo', selP.value); btnP.disabled=false; } else { btnP.removeAttribute('data-correo'); btnP.disabled=true; } };
+    }
     document.querySelectorAll('[data-oea]').forEach(function(sel){
       sel.onchange = function(){
         var e = all.find(function(x){return x.id===sel.getAttribute('data-oea');});
