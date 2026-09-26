@@ -14,7 +14,7 @@
    este archivo con CACHE_NAME incrementado (v1 -> v2, etc.) para forzar a
    que el celular descargue la versión nueva la próxima vez que haya wifi. */
 
-var CACHE_NAME = 'ferias-shell-v25';
+var CACHE_NAME = 'ferias-shell-v26';
 var ARCHIVOS_ESENCIALES = [
   './',
   './index.html',
@@ -40,7 +40,8 @@ self.addEventListener('install', function (e) {
       // la app abra offline. Los archivos de OCR pesan más (~14 MB): se
       // cachean aparte, uno por uno, para que un fallo puntual en uno de
       // ellos (ej. wifi débil) no tumbe el cascarón esencial ya logrado.
-      return cache.addAll(ARCHIVOS_ESENCIALES).then(function () {
+      // cache:'reload' evita que el navegador entregue la versión vieja guardada (caché HTTP de GitHub Pages).
+      return cache.addAll(ARCHIVOS_ESENCIALES.map(function (u) { return new Request(u, { cache: 'reload' }); })).then(function () {
         return Promise.all(ARCHIVOS_OCR.map(function (url) {
           return fetch(url).then(function (resp) {
             if (resp && resp.ok) return cache.put(url, resp);
