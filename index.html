@@ -85,6 +85,10 @@ label.small{font-size:12px; color:var(--muted); font-weight:600; text-transform:
 header.top{
   position:sticky; top:0; z-index:20; background:var(--navy); color:#fff;
   padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:8px;
+  /* v27: en el iPhone (app en pantalla de inicio) la barra quedaba debajo de la hora/batería
+     y el botón Día/Noche no recibía el toque. Se baja lo que mida esa franja. */
+  padding-top:calc(12px + env(safe-area-inset-top, 0px));
+  padding-left:calc(14px + env(safe-area-inset-left, 0px)); padding-right:calc(14px + env(safe-area-inset-right, 0px));
 }
 header.top .brand{font-weight:800; font-size:15px}
 header.top .brand small{display:block; font-weight:400; font-size:10.5px; color:#b9c7d6}
@@ -849,7 +853,7 @@ function extraerCamposComprobante(texto){
    CACHE_NAME en sw.js) permite confirmar en 2 segundos, mirando la pantalla
    de inicio, si el celular ya tiene lo último — sin tener que adivinar por
    los síntomas. Súbelo junto con CACHE_NAME en cada publicación. */
-var APP_VERSION = 'v26';
+var APP_VERSION = 'v27';
 
 /* ---------- Estado de la app ---------- */
 var STATE = {
